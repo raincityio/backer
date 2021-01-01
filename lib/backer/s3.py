@@ -75,22 +75,15 @@ class S3Storage:
         id_ = backsnap.meta.key.id_
         fsguid = backsnap.meta.key.fsguid
         named_indexes = {
-            'current': "%s/%s/fs/%s/index/current.index" %
-                (self.prefix, VERSION, fsguid),
-            'month':   "%s/%s/fs/%s/index/%s-%s.index" %
-                (self.prefix, VERSION, fsguid, now.year, now.month),
-            'day':     "%s/%s/fs/%s/index/%s-%s-%s.index" %
-                (self.prefix, VERSION, fsguid, now.year, now.month, now.day),
-            'hour':    "%s/%s/fs/%s/index/%s-%s-%s-%s.index" % 
-                (self.prefix, VERSION, fsguid, now.year, now.month, now.day, now.hour),
-
-            'current_id': "%s/%s/fs/%s/index/%s/current.index" %
+            'current': "%s/%s/fs/%s/index/%s/current.index" %
                 (self.prefix, VERSION, fsguid, id_),
-            'month_id':   "%s/%s/fs/%s/index/%s/%s-%s.index" %
+            'year':   "%s/%s/fs/%s/index/%s/%s.index" %
+                (self.prefix, VERSION, fsguid, id_, now.year),
+            'month':   "%s/%s/fs/%s/index/%s/%s-%s.index" %
                 (self.prefix, VERSION, fsguid, id_, now.year, now.month),
-            'day_id':     "%s/%s/fs/%s/index/%s/%s-%s-%s.index" %
+            'day':     "%s/%s/fs/%s/index/%s/%s-%s-%s.index" %
                 (self.prefix, VERSION, fsguid, id_, now.year, now.month, now.day),
-            'hour_id':    "%s/%s/fs/%s/index/%s/%s-%s-%s-%s.index" % 
+            'hour':    "%s/%s/fs/%s/index/%s/%s-%s-%s-%s.index" % 
                 (self.prefix, VERSION, fsguid, id_, now.year, now.month, now.day, now.hour),
         }
         
@@ -107,11 +100,8 @@ class S3Storage:
                 indexes[name] = path
         backsnap.set_indexes(indexes)
 
-    def get_current_meta(self, fsguid, *, id_=None):
-        path = "%s/%s/fs/%s/index" % (self.prefix, VERSION, fsguid)
-        if id_ is not None:
-            path = "%s/%s" % (path, id_)
-        path = "%s/current.index" % path
+    def get_current_meta(self, fsguid, id_):
+        path = "%s/%s/fs/%s/index/%s/current.index" % (self.prefix, VERSION, fsguid, id_)
         with tempfile.TemporaryFile() as out:
             self.s3.download_fileobj(self.bucket, path, out)
             out.flush()
