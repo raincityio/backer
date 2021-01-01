@@ -47,27 +47,34 @@ class S3Storage:
         logging.info("s3 get %s" % metakey)
         self.s3.download_fileobj(self.bucket, self._get_data_path(metakey), stream)
 
-    def list(self):
+    def _ls(self, path):
+        names = []
         token = None
-        metas = []
         while True:
             if token is None:
                 response = self.s3.list_objects_v2(Bucket=self.bucket,
-                        Prefix="%s/%s/fs/" % (self.prefix, VERSION),
+                        Prefix="%s/%s/%s" % (self.prefix, VERSION, path),
                         Delimiter="/")
             else:
                 response = self.s3.list_objects_v2(Bucket=self.bucket,
-                        Prefix="%s/%s/fs/" % (self.prefix, VERSION),
+                        Prefix="%s/%s/%s" % (self.prefix, VERSION, path),
                         Delimiter="/", ContinuationToken=token)
             if 'CommonPrefixes' in response:
                 for cp in response['CommonPrefixes']:
-                    fsguid = cp['Prefix'].split('/')[-2]
-                    meta = self.get_current_meta(fsguid)
-                    metas.append(meta)
+                    name = cp['Prefix'].split('/')[-2]
+                    names.append(name)
             if response['IsTruncated']:
                 token = response['NextContinuationToken']
             else:
                 break
+        return names
+
+    def list(self):
+        metas = []
+        for fsguid in self._ls("fs/"):
+            for id_ in self._ls("fs/%s/index/" % fsguid):
+                meta = self.get_current_meta(fsguid, id_)
+                metas.append(meta)
         return metas
 
     def index(self, backsnap):

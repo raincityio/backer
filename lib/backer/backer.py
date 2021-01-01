@@ -132,7 +132,7 @@ def backup(storage, fsname, id_, *, force=False):
         previous = backsnap
             
 def restore(storage, meta_discovery, fsguid, id_, restore_fsname):
-    latest_meta = meta_discovery(fsguid, id_=id_)
+    latest_meta = meta_discovery(fsguid, id_)
     if latest_meta is None:
         raise Exception("latest not found")
     fsguid = latest_meta.key.fsguid
