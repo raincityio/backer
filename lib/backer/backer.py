@@ -6,6 +6,8 @@ import json
 import tempfile
 import time
 import logging
+import threading
+import signal
 
 from .common import VERSION, Meta
 from . import zfs
@@ -230,14 +232,40 @@ def main():
         for meta in storage.list():
             print(meta)
     elif args.daemon:
-        while True:
-            for fsname in cfg.get('filesystems', default={}).keys():
-                try:
-                    id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                    backup(storage, fsname, id_)
-                    index(storage, fsname, id_)
-                except Exception as e:
-                    logging.exception(e)
-            time.sleep(cfg.get('daemon_period', default=60))
+        period = cfg.get('daemon_period', default=60)
+        finished = threading.Event()
+
+        def indexer_daemon():
+            while not finished.is_set():
+                for fsname in cfg.get('filesystems', default={}).keys():
+                    try:
+                        id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
+                        index(storage, fsname, id_)
+                    except Exception as e:
+                        logging.exception(e)
+                if finished.wait(timeout=period):
+                    break
+
+        def backer_daemon():
+            while not finished.is_set():
+                for fsname in cfg.get('filesystems', default={}).keys():
+                    try:
+                        id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
+                        backup(storage, fsname, id_)
+                    except Exception as e:
+                        logging.exception(e)
+                if finished.wait(timeout=period):
+                    break
+
+        def signal_handler(*args):
+            finished.set()
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        threading.Thread(target=indexer_daemon).start()
+        threading.Thread(target=backer_daemon).start()
+
+        finished.wait()
     else:
         raise Exception("action not specified")
