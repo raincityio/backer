@@ -15,6 +15,6 @@ load_rc_config $name
 rcvar="${name}_enable"
 pidfile="/var/run/$name.pid"
 command="/usr/sbin/daemon"
-command_args="-c -r -t $name -S -T $name -P $pidfile /usr/local/backer/bin/backer"
+command_args="-c -r -t $name -S -T $name -P $pidfile /usr/local/backer/bin/backer --daemon"
 
 run_rc_command "$1"
