@@ -40,11 +40,11 @@ class S3Storage:
         return "%s/%s/fs/%s/index/%s/%s.index" % (self.prefix, VERSION, fsguid, id_, prefix)
 
     def put_data(self, metakey, stream):
-        logging.info("s3 put %s" % metakey)
+        logging.debug("s3 put %s" % metakey)
         self.s3.upload_fileobj(stream, self.bucket, self._get_data_path(metakey))
 
     def get_data(self, metakey, stream):
-        logging.info("s3 get %s" % metakey)
+        logging.debug("s3 get %s" % metakey)
         self.s3.download_fileobj(self.bucket, self._get_data_path(metakey), stream)
 
     def _ls(self, path):
@@ -78,7 +78,7 @@ class S3Storage:
         return metas
 
     def index(self, backsnap):
-        logging.info("s3 index %s" % backsnap.meta.key)
+        logging.debug("s3 index %s" % backsnap.meta.key)
         index = S3Index(backsnap.meta)
         indexblob = json.dumps(index.to_map()).encode('utf8')
         now = datetime.utcnow()
@@ -99,7 +99,7 @@ class S3Storage:
             for name, path in named_indexes.items():
                 if (name in indexes) and (indexes[name] == path):
                     continue
-                logging.info("s3 index put %s" % path)
+                logging.debug("s3 index put %s" % path)
                 out.seek(0)
                 self.s3.upload_file(out.name, self.bucket, path)
                 indexes[name] = path

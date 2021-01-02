@@ -140,7 +140,7 @@ def restore(storage, meta_discovery, fsguid, id_, restore_fsname):
     fsguid = latest_meta.key.fsguid
     for n in range(latest_meta.key.n+1):
         metakey = Meta.Key(fsguid, id_, n)
-        logging.info("restore recv %s" % metakey)
+        logging.debug("restore recv %s" % metakey)
         with tempfile.TemporaryFile() as out:
             storage.get_data(metakey, out)
             out.flush()
