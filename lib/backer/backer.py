@@ -181,6 +181,16 @@ class Config:
             return default
         raise KeyError(key)
 
+    def __getitem__(self, key):
+        return self.get(key)
+
+    def __contains__(self, key):
+        try:
+            self.get(key)
+        except KeyError:
+            return False
+        return True
+
 def main():
     logging.basicConfig(level=logging.INFO)
 
@@ -202,6 +212,13 @@ def main():
     if True:
         import boto3
         from .s3 import S3Storage
+        if 'aws:creds' in cfg:
+            os.environ['AWS_SHARED_CREDENTIALS_FILE'] = cfg['aws:creds']
+        if 'aws:profile' in cfg:
+            os.environ['AWS_PROFILE'] = cfg['aws:profile']
+        if 'aws:region' in cfg:
+            os.environ['AWS_REGION'] = cfg['aws:region']
+
         session = boto3.Session()
         s3 = session.client("s3")
         bucket = cfg.get('s3:bucket')
