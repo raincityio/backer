@@ -4,13 +4,11 @@ import os
 import argparse
 import json
 import tempfile
-import time
 import logging
 import threading
 import signal
 
 from .common import VERSION, Meta
-from . import zfs
 
 VERSION_PROP = "backer:version"
 STATE_PROP = "backer:state"
@@ -42,7 +40,7 @@ class Backsnap:
 
     def __init__(self, snapshot):
         self.snapshot = snapshot
-        statedata = snapshot.get(STATE_PROP)
+        statedata = str(snapshot.get(STATE_PROP))
         self._state = State.from_map(json.loads(statedata))
         self.meta = self._state.meta
 
@@ -62,7 +60,7 @@ class Backsnap:
 
     def _apply_state(self):
         statedata = json.dumps(self._state.to_map())
-        self.snapshot.set(STATE_PROP, statedata)
+        self.snapshot.set(STATE_PROP, self.snapshot.Value(statedata))
 
     @staticmethod
     def name(metakey):
@@ -72,8 +70,8 @@ class Backsnap:
     def create(fs, metakey):
         state = State.create(fs, metakey)
         snapshot = fs.snapshot(Backsnap.name(metakey), props={
-                VERSION_PROP: VERSION,
-                STATE_PROP: json.dumps(state.to_map())})
+                VERSION_PROP: fs.Value(VERSION),
+                STATE_PROP: fs.Value(json.dumps(state.to_map()))})
         return Backsnap(snapshot)
 
 # return list of backsnaps sort in ascending order
@@ -97,23 +95,23 @@ def get_latest_stored(fs, id_):
         return None
     return backsnaps[-1]
 
-def index(storage, fsname, id_):
-    fs = zfs.get_filesystem(fsname)
+def index(local, remote, fsname, id_):
+    fs = local.get_filesystem(fsname)
     latest = get_latest_stored(fs, id_)
     if latest is not None:
-        storage.index(latest)
+        remote.index(latest)
 
-def backup(storage, fsname, id_, *, force=False):
-    fs = zfs.get_filesystem(fsname)
+def backup(local, remote, fsname, id_, *, force=False):
+    fs = local.get_filesystem(fsname)
 
     backsnaps = get_backsnaps(fs, id_)
     if len(backsnaps) == 0:
-        metakey = Meta.Key(fs.get('guid'), id_, 0)
+        metakey = Meta.Key(str(fs.get('guid')), id_, 0)
         backsnaps.append(Backsnap.create(fs, metakey))
     else:
         latest = backsnaps[-1]
         if force or (not latest.snapshot.check_is_current()):
-            metakey = Meta.Key(fs.get('guid'), id_, latest.meta.key.n+1)
+            metakey = Meta.Key(str(fs.get('guid')), id_, latest.meta.key.n+1)
             backsnaps.append(Backsnap.create(fs, metakey))
 
     previous = None
@@ -126,14 +124,14 @@ def backup(storage, fsname, id_, *, force=False):
                     backsnap.snapshot.send(out, other=previous.snapshot)
                 out.flush()
                 out.seek(0)
-                storage.put_data(backsnap.meta.key, out)
-            storage.index(backsnap)
+                remote.put_data(backsnap.meta.key, out)
+            remote.index(backsnap)
             backsnap.set_stored(True)
         if previous is not None:
             previous.snapshot.destroy()
         previous = backsnap
             
-def restore(storage, meta_discovery, fsguid, id_, restore_fsname):
+def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
     latest_meta = meta_discovery(fsguid, id_)
     if latest_meta is None:
         raise Exception("latest not found")
@@ -142,11 +140,11 @@ def restore(storage, meta_discovery, fsguid, id_, restore_fsname):
         metakey = Meta.Key(fsguid, id_, n)
         logging.debug("restore recv %s" % metakey)
         with tempfile.TemporaryFile() as out:
-            storage.get_data(metakey, out)
+            remote.get_data(metakey, out)
             out.flush()
             out.seek(0)
-            zfs.recv(restore_fsname, out)
-    fs = zfs.get_filesystem(restore_fsname)
+            local.recv(restore_fsname, out)
+    fs = local.get_filesystem(restore_fsname)
     for name in fs.list_snapshots():
         snapshot = fs.get_snapshot(name)
         snapshot.destroy()
@@ -223,30 +221,34 @@ def main():
         s3 = session.client("s3")
         bucket = cfg.get('s3:bucket')
         prefix = cfg.get('s3:prefix')
-        storage = S3Storage(s3, bucket, prefix)
+        remote = S3Storage(s3, bucket, prefix)
 
-    meta_discovery = storage.get_current_meta
+    if True:
+        from . import zfs
+        local = zfs
+
+    meta_discovery = remote.get_current_meta
 
     if args.backup:
         fsname = args.backup
-        backup(storage, fsname, args.i, force=args.force) 
+        backup(local, remote, fsname, args.i, force=args.force) 
     elif args.index:
         fsname = args.index
-        index(storage, fsname, args.i)
+        index(local, remote, fsname, args.i)
     elif args.backup_all:
         for fsname in cfg.get('filesystems', default={}).keys():
             id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-            backup(storage, fsname, id_, force=args.force)
+            backup(local, remote, fsname, id_, force=args.force)
     elif args.index_all:
         for fsname in cfg.get('filesystems', default={}).keys():
             id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-            index(storage, fsname, id_)
+            index(local, remote, fsname, id_)
     elif args.restore:
         fsguid = args.restore[0]
         restore_fsname = args.restore[1]
-        restore(storage, meta_discovery, fsguid, args.i, restore_fsname)
+        restore(local, remote, meta_discovery, fsguid, args.i, restore_fsname)
     elif args.list:
-        for meta in storage.list():
+        for meta in rewmote.list():
             print(meta)
     elif args.daemon:
         period = cfg.get('daemon_period', default=60)
@@ -257,7 +259,7 @@ def main():
                 for fsname in cfg.get('filesystems', default={}).keys():
                     try:
                         id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                        index(storage, fsname, id_)
+                        index(local, remote, fsname, id_)
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):
@@ -268,7 +270,7 @@ def main():
                 for fsname in cfg.get('filesystems', default={}).keys():
                     try:
                         id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                        backup(storage, fsname, id_)
+                        backup(local, remote, fsname, id_)
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):

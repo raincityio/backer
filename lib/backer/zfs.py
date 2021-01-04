@@ -10,17 +10,34 @@ import uuid
 import subprocess
 from subprocess import check_output
 
+class Value:
+
+    def __init__(self, raw):
+        if type(raw) is not str:
+            raise Exception()
+        if raw == '-':
+            raise Exception()
+        self.raw = raw
+
+    def __str__(self):
+        return self.raw
+
+    def __repr__(self):
+        return str(self)
+
+    @staticmethod
+    def parse(raw):
+        if raw == '-':
+            return None
+        return Value(raw)
+
 def validate_prop(key, value):
     if type(key) is not str:
         raise TypeError(key)
     if len(key) == 0:
         raise ValueError(key)
-    if type(value) is not str:
+    if type(value) is not Value:
         raise TypeError(value)
-    if len(value) == 0:
-        raise ValueError(value)
-    if value == '-':
-        raise ValueError(value)
 
 def validate_props(props):
     for key, value in props.items():
@@ -37,9 +54,14 @@ def validate_snapshot_fullname(name):
         raise TypeError(name)
     if len(name) == 0:
         raise ValueError(name)
-    name.index('@')
+    try:
+        name.index('@')
+    except ValueError:
+        raise ValueError(name)
 
 class Snapshot:
+
+    Value = Value
 
     def __init__(self, fs, name):
         # sanity check to make sure that we are actually
@@ -56,10 +78,7 @@ class Snapshot:
     def get(self, key):
         output = check_output(["zfs", "get", "-p", "-H", "-o", "value",
                 key, self.name])
-        value = output.rstrip().decode('utf8')
-        if value == "-":
-            raise KeyError(key)
-        return value
+        return Value.parse(output.rstrip().decode('utf8'))
 
     def send(self, output, *, other=None):
         if other is None:
@@ -93,6 +112,8 @@ class Snapshot:
         return str(self)
 
 class Filesystem:
+
+    Value = Value
 
     def __init__(self, name):
         self.name = name 
@@ -145,10 +166,18 @@ class Filesystem:
 
     def get(self, key):
         output = check_output(['zfs', 'get', '-H', '-o', 'value', key, self.name])
-        value = output.rstrip().decode('utf8')
-        if value == "-":
-            raise KeyError(key)
-        return value
+        return Value.parse(output.rstrip().decode('utf8'))
+
+    def get_all(self):
+        props = {}
+        output = check_output(['zfs', 'get', '-H', '-p', 'all', self.name])
+        output = output.rstrip().decode('utf8')
+        for line in output.split('\n'):
+            parts = line.split('\t')
+            key = parts[1]
+            value = Value.parse(parts[2])
+            props[key] = value
+        return props
 
     def check_snapshot_exists(self, name):
         proc = subprocess.run(['zfs', 'list', '-t', 'snapshot', self._full_snapshot_name(name)],
