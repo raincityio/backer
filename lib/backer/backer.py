@@ -160,6 +160,18 @@ class Config:
         else:
             self.cfg = {}
 
+    def getfs(self, fsname, key, *, default=None):
+        if fsname is None:
+            value = None
+        else:
+            try:
+                value = self.get("filesystems.%s.%s" % (fsname, key))
+            except KeyError:
+                value = None
+        if value is None:
+            return self.get(key, default=default)
+        return value
+
     def get(self, key, *, default=None):
         parts = key.split(".")
         current = self.cfg
@@ -193,77 +205,113 @@ def main():
     parser.add_argument('-c', default='/usr/local/etc/backer.json', help='config')
     parser.add_argument('--backup', help='backup')
     parser.add_argument('--index', help='index')
-    parser.add_argument('-i', default='default', help='backup id')
+    parser.add_argument('--id', default='default', help='backup id')
     parser.add_argument('--force', action='store_true', help='force')
     parser.add_argument('--backup-all', action='store_true', help='backup all')
     parser.add_argument('--index-all', action='store_true', help='index all')
     parser.add_argument('--restore', nargs=2, help='restore')
     parser.add_argument('--list', action='store_true', help='list')
     parser.add_argument('--daemon', action='store_true', help='daemon')
+    parser.add_argument('--remote', help='remote source')
+    parser.add_argument('--local', help='local source')
     args = parser.parse_args()
 
     cfg = Config(filename=args.c)
     if ('version' in cfg) and (VERSION != cfg['version']):
         raise Exception("version mismatch: %s != %s" % (VERSION, cfg['version']))
 
-    if True:
-        import boto3
-        from .s3 import S3Storage
-        if 'aws:creds' in cfg:
-            os.environ['AWS_SHARED_CREDENTIALS_FILE'] = cfg['aws:creds']
-        if 'aws:profile' in cfg:
-            os.environ['AWS_PROFILE'] = cfg['aws:profile']
-        if 'aws:region' in cfg:
-            os.environ['AWS_REGION'] = cfg['aws:region']
+    def get_id(fsname):
+        if args.id is None:
+            id_ = cfg.getfs(fsname, 'id', default='default')
+        else:
+            id_ = args.id
+        return id_
 
-        session = boto3.Session()
-        s3 = session.client("s3")
-        bucket = cfg.get('s3:bucket')
-        prefix = cfg.get('s3:prefix')
-        remote = S3Storage(s3, bucket, prefix)
+    remotes = {}
+    def get_remote(*, fsname=None):
+        if fsname in remotes:
+            return remotes[fsname]
+        if args.remote is None:
+            remotename = cfg.getfs(fsname, 'remote', default='s3')
+        else:
+            remotename = args.remote
+        if remotename == 'local':
+            from .local import LocalStorage
+            root = cfg.getfs(fsname, 'local:root')
+            remote = LocalStorage(root)
+        elif remotename == 's3':
+            import boto3
+            from .s3 import S3Storage
+            if 'aws:creds' in cfg:
+                os.environ['AWS_SHARED_CREDENTIALS_FILE'] = cfg['aws:creds']
+            if 'aws:profile' in cfg:
+                os.environ['AWS_PROFILE'] = cfg['aws:profile']
+            if 'aws:region' in cfg:
+                os.environ['AWS_REGION'] = cfg['aws:region']
 
-    if True:
-        from . import zfs
-        local = zfs
+            session = boto3.Session()
+            s3 = session.client("s3")
+            bucket = cfg.getfs(fsname, 's3:bucket')
+            prefix = cfg.getfs(fsname, 's3:prefix')
+            remote = S3Storage(s3, bucket, prefix)
+        else:
+            raise Exception("unknown remote: %s" % fsname)
+        remotes[fsname] = remote
+        return remote
 
-    meta_discovery = remote.get_current_meta
+    locals_ = {}
+    def get_local(fsname):
+        if fsname in locals_:
+            return locals_[fsname]
+        if args.local is None:
+            localname = cfg.getfs(fsname, 'local', default='zfs')
+        else:
+            localname = args.local
+        if localname == 'zfs':
+            from . import zfs
+            local = zfs
+        else:
+            raise Exception("unknown local: %s" % fsname)
+        locals_[fsname] = local
+        return local
 
     if args.backup:
         fsname = args.backup
-        fs = local.get_filesystem(fsname)
-        backup(fs, remote, args.i, force=args.force) 
+        fs = get_local(fsname).get_filesystem(fsname)
+        backup(fs, get_remote(fsname=fsname), get_id(fsname), force=args.force) 
     elif args.index:
         fsname = args.index
-        fs = local.get_filesystem(fsname)
-        index(fs, remote, args.i)
+        fs = get_local(fsname).get_filesystem(fsname)
+        index(fs, get_remote(fsname=fsname), get_id(fsname))
     elif args.backup_all:
         for fsname in cfg.get('filesystems', default={}).keys():
-            fs = local.get_filesystem(fsname)
-            id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-            backup(fs, remote, id_, force=args.force)
+            fs = get_local(fsname).get_filesystem(fsname)
+            backup(fs, get_remote(fsname=fsname), get_id(fsname), force=args.force)
     elif args.index_all:
         for fsname in cfg.get('filesystems', default={}).keys():
-            fs = local.get_filesystem(fsname)
-            id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-            index(fs, remote, id_)
+            fs = get_local(fsname).get_filesystem(fsname)
+            index(fs, get_remote(fsname=fsname), get_id(fsname))
     elif args.restore:
         fsguid = args.restore[0]
         restore_fsname = args.restore[1]
-        restore(local, remote, meta_discovery, fsguid, args.i, restore_fsname)
+        local = get_local(restore_fsname)
+        remote = get_remote(fsname=restore_fsname)
+        meta_discovery = remote.get_current_meta
+        id_ = get_id(restore_fsname)
+        restore(local, remote, meta_discovery, fsguid, id_, restore_fsname)
     elif args.list:
-        for meta in remote.list():
+        for meta in get_remote().list():
             print(meta)
     elif args.daemon:
-        period = cfg.get('daemon_period', default=60)
+        period = cfg.get('daemon:period', default=60)
         finished = threading.Event()
 
         def indexer_daemon():
             while not finished.is_set():
                 for fsname in cfg.get('filesystems', default={}).keys():
                     try: 
-                        fs = local.get_filesystem(fsname)
-                        id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                        index(fs, remote, id_)
+                        fs = get_local(fsname).get_filesystem(fsname)
+                        index(fs, get_remote(fsname=fsname), get_id(fsname))
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):
@@ -273,9 +321,8 @@ def main():
             while not finished.is_set():
                 for fsname in cfg.get('filesystems', default={}).keys():
                     try:
-                        fs = local.get_filesystem(fsname)
-                        id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                        backup(fs, remote, id_)
+                        fs = get_local(fsname).get_filesystem(fsname)
+                        backup(fs, get_remote(fsname=fsname), get_id(fsname))
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+import os
+import sys
+
+libpath = "%s/../lib" % os.path.dirname(__file__)
+sys.path.insert(0, libpath)
+
 from backer.backer import main
 
 main()
