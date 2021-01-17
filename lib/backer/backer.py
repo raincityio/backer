@@ -95,15 +95,12 @@ def get_latest_stored(fs, id_):
         return None
     return backsnaps[-1]
 
-def index(local, remote, fsname, id_):
-    fs = local.get_filesystem(fsname)
+def index(fs, remote, id_):
     latest = get_latest_stored(fs, id_)
     if latest is not None:
         remote.index(latest)
 
-def backup(local, remote, fsname, id_, *, force=False):
-    fs = local.get_filesystem(fsname)
-
+def backup(fs, remote, id_, *, force=False):
     backsnaps = get_backsnaps(fs, id_)
     if len(backsnaps) == 0:
         metakey = Meta.Key(str(fs.get('guid')), id_, 0)
@@ -206,6 +203,8 @@ def main():
     args = parser.parse_args()
 
     cfg = Config(filename=args.c)
+    if ('version' in cfg) and (VERSION != cfg['version']):
+        raise Exception("version mismatch: %s != %s" % (VERSION, cfg['version']))
 
     if True:
         import boto3
@@ -231,24 +230,28 @@ def main():
 
     if args.backup:
         fsname = args.backup
-        backup(local, remote, fsname, args.i, force=args.force) 
+        fs = local.get_filesystem(fsname)
+        backup(fs, remote, args.i, force=args.force) 
     elif args.index:
         fsname = args.index
-        index(local, remote, fsname, args.i)
+        fs = local.get_filesystem(fsname)
+        index(fs, remote, args.i)
     elif args.backup_all:
         for fsname in cfg.get('filesystems', default={}).keys():
+            fs = local.get_filesystem(fsname)
             id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-            backup(local, remote, fsname, id_, force=args.force)
+            backup(fs, remote, id_, force=args.force)
     elif args.index_all:
         for fsname in cfg.get('filesystems', default={}).keys():
+            fs = local.get_filesystem(fsname)
             id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-            index(local, remote, fsname, id_)
+            index(fs, remote, id_)
     elif args.restore:
         fsguid = args.restore[0]
         restore_fsname = args.restore[1]
         restore(local, remote, meta_discovery, fsguid, args.i, restore_fsname)
     elif args.list:
-        for meta in rewmote.list():
+        for meta in remote.list():
             print(meta)
     elif args.daemon:
         period = cfg.get('daemon_period', default=60)
@@ -257,9 +260,10 @@ def main():
         def indexer_daemon():
             while not finished.is_set():
                 for fsname in cfg.get('filesystems', default={}).keys():
-                    try:
+                    try: 
+                        fs = local.get_filesystem(fsname)
                         id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                        index(local, remote, fsname, id_)
+                        index(fs, remote, id_)
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):
@@ -269,8 +273,9 @@ def main():
             while not finished.is_set():
                 for fsname in cfg.get('filesystems', default={}).keys():
                     try:
+                        fs = local.get_filesystem(fsname)
                         id_ = cfg.get("filesystems.%s.id" % fsname, default='default')
-                        backup(local, remote, fsname, id_)
+                        backup(fs, remote, id_)
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):
