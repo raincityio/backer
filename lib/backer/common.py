@@ -3,7 +3,7 @@
 import time
 import socket
 
-VERSION='6c'
+VERSION='5'
 
 class Meta:
 
