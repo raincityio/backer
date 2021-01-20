@@ -21,7 +21,7 @@ class FsMeta:
 
     def to_map(self):
         return {
-            'type': 'local',
+            'type': 'fs',
             'root': self.root
         }
 
@@ -88,12 +88,12 @@ class FsRemote:
         return "%s/%s.index" % (self._get_index_path(fsguid, id_), prefix)
 
     def put_data(self, metakey, stream):
-        logging.debug("local put %s" % metakey)
+        logging.debug("fs put %s" % metakey)
         with open(self._get_data_nodepath(metakey), 'wb') as out:
             shutil.copyfileobj(stream, out)
 
     def get_data(self, metakey, stream):
-        logging.debug("local get %s" % metakey)
+        logging.debug("fs get %s" % metakey)
         with open(self._get_data_nodepath(metakey), 'rb') as in_:
             shutil.copyfileobj(in_, stream)
 
@@ -113,7 +113,7 @@ class FsRemote:
 
     # TODO, this should be a noop
     def index(self, backsnap):
-        logging.debug("local index %s" % backsnap.meta.key)
+        logging.debug("fs index %s" % backsnap.meta.key)
         index = FsIndex(backsnap.meta)
         indexblob = json.dumps(index.to_map()).encode('utf8')
         now = datetime.utcnow()
@@ -131,7 +131,7 @@ class FsRemote:
         for name, path in named_indexes.items():
             if (name in indexes) and (indexes[name] == path):
                 continue
-            logging.debug("local index put %s" % path)
+            logging.debug("fs index put %s" % path)
             with open(path, 'wb') as out:
                 out.write(indexblob)
             indexes[name] = path

@@ -34,14 +34,14 @@ class State:
     def from_map(statemap):
         meta = Meta.from_map(statemap['meta'])
         remote_type = statemap['remote']['type']
-        if remote_type == 'local':
+        if remote_type == 'fs':
             from .fs import FsMeta
             RemoteMeta = FsMeta
         elif remote_type == 's3':
             from .s3 import S3Meta
             RemoteMeta = S3Meta
         else:
-            raise Exception("unknown remote: %s" % remote)
+            raise Exception("unknown remote: %s" % remote_type)
         remote_meta = RemoteMeta.from_map(statemap['remote'])
         return State(meta, statemap['stored'], statemap['indexes'], remote_meta)
 
