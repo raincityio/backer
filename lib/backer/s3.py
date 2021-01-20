@@ -57,22 +57,34 @@ class S3Remote:
         self.prefix = prefix
         self.meta = S3Meta(bucket, prefix)
 
-    def _get_data_path(self, metakey):
-        id_ = metakey.id_
-        fsguid = metakey.fsguid
-        n = metakey.n
-        return "%s/%s/fs/%s/data/%s/%s.data" % (self.prefix, VERSION, fsguid, id_, n)
+    def _get_path(self):
+        return "%s/%s" % (self.prefix, VERSION)
 
-    def _get_index_path(self, fsguid, id_, prefix):
-        return "%s/%s/fs/%s/index/%s/%s.index" % (self.prefix, VERSION, fsguid, id_, prefix)
+    def _get_fs_path(self):
+        return "%s/fs" % self._get_path()
+
+    def _get_fsguid_path(self, fsguid):
+        return "%s/%s.fs" % (self._get_fs_path(), fsguid)
+
+    def _get_type_path(self, fsguid, id_, type_):
+        return "%s/%s.backup/%s" % (self._get_fsguid_path(fsguid), id_, type_)
+
+    def _get_type_nodepath(self, fsguid, id_, fn, type_):
+        return "%s/%s.%s" % (self._get_type_path(fsguid, id_, type_), fn, type_)
+
+    def _get_data_nodepath(self, metakey):
+        return self._get_type_nodepath(metakey.fsguid, metakey.id_, metakey.n, 'data')
+
+    def _get_index_nodepath(self, fsguid, id_, index_name):
+        return self._get_type_nodepath(fsguid, id_, index_name, 'index')
 
     def put_data(self, metakey, stream):
         logging.debug("s3 put %s" % metakey)
-        self.s3.upload_fileobj(stream, self.bucket, self._get_data_path(metakey))
+        self.s3.upload_fileobj(stream, self.bucket, self._get_data_nodepath(metakey))
 
     def get_data(self, metakey, stream):
         logging.debug("s3 get %s" % metakey)
-        self.s3.download_fileobj(self.bucket, self._get_data_path(metakey), stream)
+        self.s3.download_fileobj(self.bucket, self._get_data_nodepath(metakey), stream)
 
     def _ls(self, path):
         names = []
@@ -80,12 +92,10 @@ class S3Remote:
         while True:
             if token is None:
                 response = self.s3.list_objects_v2(Bucket=self.bucket,
-                        Prefix="%s/%s/%s" % (self.prefix, VERSION, path),
-                        Delimiter="/")
+                        Prefix="%s/" % path, Delimiter="/")
             else:
                 response = self.s3.list_objects_v2(Bucket=self.bucket,
-                        Prefix="%s/%s/%s" % (self.prefix, VERSION, path),
-                        Delimiter="/", ContinuationToken=token)
+                        Prefix="%s/" % path, Delimiter="/", ContinuationToken=token)
             if 'CommonPrefixes' in response:
                 for cp in response['CommonPrefixes']:
                     name = cp['Prefix'].split('/')[-2]
@@ -98,8 +108,14 @@ class S3Remote:
 
     def list(self):
         metas = []
-        for fsguid in self._ls("fs/"):
-            for id_ in self._ls("fs/%s/index/" % fsguid):
+        for fsguid_node in self._ls(self._get_fs_path()):
+            if not fsguid_node.endswith('.fs'):
+                continue
+            fsguid = fsguid_node[:-3]
+            for id_node in self._ls(self._get_fsguid_path(fsguid)):
+                if not id_node.endswith('.backup'):
+                    continue
+                id_ = id_node[:-7]
                 meta = self.get_current_meta(fsguid, id_)
                 metas.append(meta)
         return metas
@@ -112,11 +128,11 @@ class S3Remote:
         fsguid = backsnap.meta.key.fsguid
         id_ = backsnap.meta.key.id_
         named_indexes = {
-            'current': self._get_index_path(fsguid, id_, "current"),
-            'year': self._get_index_path(fsguid, id_, "%s" % now.year),
-            'month': self._get_index_path(fsguid, id_, "%s-%s" % (now.year, now.month)),
-            'day': self._get_index_path(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),
-            'hour': self._get_index_path(fsguid, id_, "%s-%s-%s-%s" % (now.year, now.month, now.day, now.hour))
+            'current': self._get_index_nodepath(fsguid, id_, "current"),
+            'year': self._get_index_nodepath(fsguid, id_, "%s" % now.year),
+            'month': self._get_index_nodepath(fsguid, id_, "%s-%s" % (now.year, now.month)),
+            'day': self._get_index_nodepath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),
+            'hour': self._get_index_nodepath(fsguid, id_, "%s-%s-%s-%s" % (now.year, now.month, now.day, now.hour))
         }
         
         indexes = backsnap.get_indexes()
@@ -133,7 +149,7 @@ class S3Remote:
         backsnap.set_indexes(indexes)
 
     def get_current_meta(self, fsguid, id_):
-        path = self._get_index_path(fsguid, id_, "current")
+        path = self._get_index_nodepath(fsguid, id_, "current")
         with tempfile.TemporaryFile() as out:
             self.s3.download_fileobj(self.bucket, path, out)
             out.flush()

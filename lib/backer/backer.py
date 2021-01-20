@@ -8,6 +8,7 @@ import tempfile
 import logging
 import threading
 import signal
+import yaml
 
 from .common import VERSION, Meta
 
@@ -173,7 +174,7 @@ class Config:
         elif not filename is None:
             if os.path.lexists(filename):
                 with open(filename, 'r') as in_:
-                    self.cfg = json.load(in_)
+                    self.cfg = yaml.load(in_, Loader=yaml.FullLoader)
             else:
                 self.cfg = {}
         else:
@@ -212,19 +213,20 @@ def main():
     logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', default='/usr/local/etc/backer.json', metavar='config')
+    parser.add_argument('-c', default='/usr/local/etc/backer.yaml', metavar='config')
+    parser.add_argument('-d', action='store_true', help='debug')
 
     subparsers = parser.add_subparsers(dest='action')
     
     backup_parser = subparsers.add_parser('backup')
     backup_parser.add_argument('-n', metavar='[backup name]', required=True)
-    backup_parser.add_argument('--force', action='store_true')
+    backup_parser.add_argument('--force', action='store_true', help='force')
 
     index_parser = subparsers.add_parser('index')
     index_parser.add_argument('-n', metavar='[backup name]', required=True)
 
     backup_all_parser = subparsers.add_parser('backup-all')
-    backup_all_parser.add_argument('--force', action='store_true')
+    backup_all_parser.add_argument('--force', action='store_true', help='force')
 
     subparsers.add_parser('index-all')
 
@@ -242,8 +244,11 @@ def main():
 
     args = parser.parse_args()
 
+    if args.d:
+        logging.root.setLevel(logging.DEBUG)
+
     cfg = Config(filename=args.c)
-    if ('version' in cfg) and (VERSION != cfg['version']):
+    if VERSION != cfg['version']:
         raise Exception("version mismatch: %s != %s" % (VERSION, cfg['version']))
 
     remotes = {}
