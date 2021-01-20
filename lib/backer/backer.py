@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import uuid
 import os
 import argparse
 import json
@@ -15,26 +16,38 @@ STATE_PROP = "backer:state"
 
 class State:
 
-    def __init__(self, meta, stored, indexes):
+    def __init__(self, meta, stored, indexes, remote_meta):
         self.meta = meta
         self.stored = stored
         self.indexes = indexes
+        self.remote_meta = remote_meta
 
     def to_map(self):
         return {
             'meta': self.meta.to_map(),
             'stored': self.stored,
-            'indexes': self.indexes
+            'indexes': self.indexes,
+            'remote': self.remote_meta.to_map()
         }
 
     @staticmethod
     def from_map(statemap):
         meta = Meta.from_map(statemap['meta'])
-        return State(meta, statemap['stored'], statemap['indexes'])
+        remote_type = statemap['remote']['type']
+        if remote_type == 'local':
+            from .fs import FsMeta
+            RemoteMeta = FsMeta
+        elif remote_type == 's3':
+            from .s3 import S3Meta
+            RemoteMeta = S3Meta
+        else:
+            raise Exception("unknown remote: %s" % remote)
+        remote_meta = RemoteMeta.from_map(statemap['remote'])
+        return State(meta, statemap['stored'], statemap['indexes'], remote_meta)
 
     @staticmethod
-    def create(fs, metakey):
-        return State(Meta.create(fs, metakey), False, {})
+    def create(fs, metakey, remote):
+        return State(Meta.create(fs, metakey), False, {}, remote.meta)
         
 class Backsnap:
 
@@ -43,6 +56,9 @@ class Backsnap:
         statedata = str(snapshot.get(STATE_PROP))
         self._state = State.from_map(json.loads(statedata))
         self.meta = self._state.meta
+
+    def get_remote_meta(self):
+        return self._state.remote_meta
 
     def get_indexes(self):
         return self._state.indexes
@@ -67,8 +83,8 @@ class Backsnap:
         return "backer:%s-%s-%s" % (VERSION, metakey.id_, metakey.n)
 
     @staticmethod
-    def create(fs, metakey):
-        state = State.create(fs, metakey)
+    def create(fs, remote, metakey):
+        state = State.create(fs, metakey, remote)
         snapshot = fs.snapshot(Backsnap.name(metakey), props={
                 VERSION_PROP: fs.Value(VERSION),
                 STATE_PROP: fs.Value(json.dumps(state.to_map()))})
@@ -104,12 +120,14 @@ def backup(fs, remote, id_, *, force=False):
     backsnaps = get_backsnaps(fs, id_)
     if len(backsnaps) == 0:
         metakey = Meta.Key(str(fs.get('guid')), id_, 0)
-        backsnaps.append(Backsnap.create(fs, metakey))
+        backsnaps.append(Backsnap.create(fs, remote, metakey))
     else:
         latest = backsnaps[-1]
         if force or (not latest.snapshot.check_is_current()):
             metakey = Meta.Key(str(fs.get('guid')), id_, latest.meta.key.n+1)
-            backsnaps.append(Backsnap.create(fs, metakey))
+            if remote.meta != latest.get_remote_meta():
+                raise Exception("incompatible remote: %s" % remote.meta)
+            backsnaps.append(Backsnap.create(fs, remote, metakey))
 
     previous = None
     for backsnap in backsnaps:
@@ -146,6 +164,7 @@ def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
         snapshot = fs.get_snapshot(name)
         snapshot.destroy()
 
+_none = uuid.uuid4()
 class Config:
 
     def __init__(self, *, cfg=None, filename=None):
@@ -160,19 +179,10 @@ class Config:
         else:
             self.cfg = {}
 
-    def getfs(self, fsname, key, *, default=None):
-        if fsname is None:
-            value = None
-        else:
-            try:
-                value = self.get("filesystems.%s.%s" % (fsname, key))
-            except KeyError:
-                value = None
-        if value is None:
-            return self.get(key, default=default)
-        return value
+    def list_backups(self):
+        return self.get('backups', default={}).keys()
 
-    def get(self, key, *, default=None):
+    def get(self, key, *, default=_none):
         parts = key.split(".")
         current = self.cfg
         for part in parts[:-1]:
@@ -184,7 +194,7 @@ class Config:
         part = parts[-1]                
         if part in current:
             return current[part]
-        if default is not None:
+        if default is not _none:
             return default
         raise KeyError(key)
 
@@ -205,102 +215,113 @@ def main():
     parser.add_argument('-c', default='/usr/local/etc/backer.json', help='config')
     parser.add_argument('--backup', help='backup')
     parser.add_argument('--index', help='index')
-    parser.add_argument('--id', default='default', help='backup id')
     parser.add_argument('--force', action='store_true', help='force')
     parser.add_argument('--backup-all', action='store_true', help='backup all')
     parser.add_argument('--index-all', action='store_true', help='index all')
-    parser.add_argument('--restore', nargs=2, help='restore')
     parser.add_argument('--list', action='store_true', help='list')
+    parser.add_argument('--restore', nargs=2, help='restore')
+    parser.add_argument('--remote', help='remote')
+    parser.add_argument('--local', help='local')
+    parser.add_argument('--id', default='default', help='backup id')
     parser.add_argument('--daemon', action='store_true', help='daemon')
-    parser.add_argument('--remote', help='remote source')
-    parser.add_argument('--local', help='local source')
     args = parser.parse_args()
 
     cfg = Config(filename=args.c)
     if ('version' in cfg) and (VERSION != cfg['version']):
         raise Exception("version mismatch: %s != %s" % (VERSION, cfg['version']))
 
-    def get_id(fsname):
-        if args.id is None:
-            id_ = cfg.getfs(fsname, 'id', default='default')
-        else:
-            id_ = args.id
-        return id_
-
     remotes = {}
-    def get_remote(*, fsname=None):
-        if fsname in remotes:
-            return remotes[fsname]
-        if args.remote is None:
-            remotename = cfg.getfs(fsname, 'remote', default='s3')
-        else:
-            remotename = args.remote
-        if remotename == 'local':
-            from .local import LocalStorage
-            root = cfg.getfs(fsname, 'local:root')
-            remote = LocalStorage(root)
-        elif remotename == 's3':
+    def get_remote(remote_name):
+        if remote_name is None:
+            remote_name = cfg["default_remote"]
+        if remote_name in remotes:
+            return remotes[remote_name]
+        type_ = cfg["remotes.%s.type" % remote_name]
+        if type_ == 'fs':
+            from .fs import FsRemote
+            root = cfg["remotes.%s.fs:root" % remote_name]
+            remote = FsRemote(root)
+        elif type_ == 's3':
             import boto3
-            from .s3 import S3Storage
-            if 'aws:creds' in cfg:
-                os.environ['AWS_SHARED_CREDENTIALS_FILE'] = cfg['aws:creds']
-            if 'aws:profile' in cfg:
-                os.environ['AWS_PROFILE'] = cfg['aws:profile']
-            if 'aws:region' in cfg:
-                os.environ['AWS_REGION'] = cfg['aws:region']
+            from .s3 import S3Remote
+            aws_creds = cfg.get("remotes.%s.aws:creds" % remote_name, default=None)
+            if aws_creds is not None:
+                os.environ['AWS_SHARED_CREDENTIALS_FILE'] = aws_creds
+            aws_profile = cfg.get("remotes.%s.aws:profile" % remote_name, default=None)
+            if aws_profile is not None:
+                os.environ['AWS_PROFILE'] = aws_profile
+            aws_region = cfg.get("remotes.%s.aws:region" % remote_name, default=None)
+            if aws_region is not None:
+                os.environ['AWS_REGION'] = aws_region
 
+# TODO, feed creds/profile/region directly into session, or make them global
             session = boto3.Session()
             s3 = session.client("s3")
-            bucket = cfg.getfs(fsname, 's3:bucket')
-            prefix = cfg.getfs(fsname, 's3:prefix')
-            remote = S3Storage(s3, bucket, prefix)
+            bucket = cfg["remotes.%s.s3:bucket" % remote_name]
+            prefix = cfg["remotes.%s.s3:prefix" % remote_name]
+            remote = S3Remote(s3, bucket, prefix)
         else:
-            raise Exception("unknown remote: %s" % fsname)
-        remotes[fsname] = remote
+            raise Exception("unknown remote: %s" % remote_name)
+        remotes[remote_name] = remote 
         return remote
 
     locals_ = {}
-    def get_local(fsname):
-        if fsname in locals_:
-            return locals_[fsname]
-        if args.local is None:
-            localname = cfg.getfs(fsname, 'local', default='zfs')
-        else:
-            localname = args.local
-        if localname == 'zfs':
+    def get_local(local_name):
+        if local_name is None:
+            local_name = cfg["default_local"]
+        if local_name in locals_:
+            return locals_[local_name]
+        type_ = cfg["locals.%s.type" % local_name]
+        if type_ == 'zfs':
             from . import zfs
             local = zfs
         else:
-            raise Exception("unknown local: %s" % fsname)
-        locals_[fsname] = local
+            raise Exception("unknown local: %s" % local_name)
+        locals_[local_name] = local
         return local
 
+    backups = {}
+    def get_backup(backup_name):
+        if backup_name in backups:
+            return backups[backup_name]
+        local_name = cfg.get("backups.%s.local" % backup_name, default=None)
+        local = get_local(local_name)
+        remote_name = cfg.get("backups.%s.remote" % backup_name, default=None)
+        remote = get_remote(remote_name)
+        fsname = cfg["backups.%s.fs:name" % backup_name]
+        id_ = cfg.get("backups.%s.id" % backup_name, default='default')
+        fs = local.get_filesystem(fsname)
+        backup = (fs, remote, id_,)
+        backups[backup_name] = backup
+        return backup
+
     if args.backup:
-        fsname = args.backup
-        fs = get_local(fsname).get_filesystem(fsname)
-        backup(fs, get_remote(fsname=fsname), get_id(fsname), force=args.force) 
+        backup_name = args.backup
+        fs, remote, id_ = get_backup(backup_name)
+        backup(fs, remote, id_, force=args.force) 
     elif args.index:
-        fsname = args.index
-        fs = get_local(fsname).get_filesystem(fsname)
-        index(fs, get_remote(fsname=fsname), get_id(fsname))
+        backup_name = args.index
+        fs, remote, id_ = get_backup(backup_name)
+        index(fs, remote, id_)
     elif args.backup_all:
-        for fsname in cfg.get('filesystems', default={}).keys():
-            fs = get_local(fsname).get_filesystem(fsname)
-            backup(fs, get_remote(fsname=fsname), get_id(fsname), force=args.force)
+        for backup_name in cfg.list_backups():
+            fs, remote, id_ = get_backup(backup_name)
+            backup(fs, remote, id_, force=args.force)
     elif args.index_all:
-        for fsname in cfg.get('filesystems', default={}).keys():
-            fs = get_local(fsname).get_filesystem(fsname)
-            index(fs, get_remote(fsname=fsname), get_id(fsname))
+        for backup_name in cfg.list_backups():
+            fs, remote, id_ = get_backup(backup_name)
+            index(fs, remote, id_)
     elif args.restore:
+# TODO
         fsguid = args.restore[0]
         restore_fsname = args.restore[1]
-        local = get_local(restore_fsname)
-        remote = get_remote(fsname=restore_fsname)
+        local = get_local(args.local)
+        remote = get_remote(args.remote)
         meta_discovery = remote.get_current_meta
-        id_ = get_id(restore_fsname)
+        id_ = args.id
         restore(local, remote, meta_discovery, fsguid, id_, restore_fsname)
     elif args.list:
-        for meta in get_remote().list():
+        for meta in get_remote(args.remote).list():
             print(meta)
     elif args.daemon:
         period = cfg.get('daemon:period', default=60)
@@ -308,10 +329,10 @@ def main():
 
         def indexer_daemon():
             while not finished.is_set():
-                for fsname in cfg.get('filesystems', default={}).keys():
+                for backup_name in cfg.list_backups():
                     try: 
-                        fs = get_local(fsname).get_filesystem(fsname)
-                        index(fs, get_remote(fsname=fsname), get_id(fsname))
+                        fs, remote, id_ = get_backup(backup_name)
+                        index(fs, remote, id_)
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):
@@ -319,10 +340,10 @@ def main():
 
         def backer_daemon():
             while not finished.is_set():
-                for fsname in cfg.get('filesystems', default={}).keys():
+                for backup_name in cfg.list_backups():
                     try:
-                        fs = get_local(fsname).get_filesystem(fsname)
-                        backup(fs, get_remote(fsname=fsname), get_id(fsname))
+                        fs, remote, id_ = get_backup(backup_name)
+                        backup(fs, remote, id_)
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):

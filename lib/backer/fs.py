@@ -9,7 +9,27 @@ from datetime import datetime
 
 from .common import VERSION, Meta
 
-class LocalIndex:
+class FsMeta:
+
+    def __init__(self, root):
+        self.root = root
+
+    def __eq__(self, other):
+        if not isinstance(other, FsMeta):
+            return False
+        return other.root == self.root
+
+    def to_map(self):
+        return {
+            'type': 'local',
+            'root': self.root
+        }
+
+    @staticmethod
+    def from_map(metamap):
+        return FsMeta(metamap['root'])
+
+class FsIndex:
 
     def __init__(self, meta):
         self.meta = meta
@@ -22,7 +42,7 @@ class LocalIndex:
     @staticmethod
     def from_map(indexmap):
         meta = Meta.from_map(indexmap['meta'])
-        return LocalIndex(meta)
+        return FsIndex(meta)
 
 def mkdirs(path):
     try:
@@ -30,15 +50,13 @@ def mkdirs(path):
     except FileExistsError:
         pass
 
-class LocalStorage:
+class FsRemote:
 
     def __init__(self, root):
         if not root.startswith('/'):
             raise Exception("root required to be absolute")
         self.root = root
-
-    def get_subkey(self):
-        return "local_%s" % (self.root)
+        self.meta = FsMeta(self.root)
 
     def _get_fs_path(self):
         path = "%s/%s/fs" % (self.root, VERSION)
@@ -46,12 +64,12 @@ class LocalStorage:
         return path
 
     def _get_fsguid_path(self, fsguid):
-        path = "%s/%s" % (self._get_fs_path(), fsguid)
+        path = "%s/%s.fs" % (self._get_fs_path(), fsguid)
         mkdirs(path)
         return path
 
     def _get_data_path(self, id_, fsguid):
-        path = "%s/data/%s" % (self._get_fsguid_path(fsguid), id_)
+        path = "%s/%s.backup/data" % (self._get_fsguid_path(fsguid), id_)
         mkdirs(path)
         return path
 
@@ -62,7 +80,7 @@ class LocalStorage:
         return "%s/%s.data" % (self._get_data_path(id_, fsguid), n)
 
     def _get_index_path(self, fsguid, id_):
-        path = "%s/index/%s" % (self._get_fsguid_path(fsguid), id_)
+        path = "%s/%s.backup/index" % (self._get_fsguid_path(fsguid), id_)
         mkdirs(path)
         return path
 
@@ -81,8 +99,14 @@ class LocalStorage:
 
     def list(self):
         metas = []
-        for fsguid in os.listdir(self._get_fs_path()):
-            for id_ in self.listdir(self._get_fsguid_path(fsguid)):
+        for fsnode in os.listdir(self._get_fs_path()):
+            if not fsnode.endswith('.fs'):
+                continue
+            fsguid = fsnode[:-3]
+            for idnode in os.listdir(self._get_fsguid_path(fsguid)):
+                if not idnode.endswith('.backup'):
+                    continue
+                id_ = idnode[:-7]
                 meta = self.get_current_meta(fsguid, id_)
                 metas.append(meta)
         return metas
@@ -90,7 +114,7 @@ class LocalStorage:
     # TODO, this should be a noop
     def index(self, backsnap):
         logging.debug("local index %s" % backsnap.meta.key)
-        index = LocalIndex(backsnap.meta)
+        index = FsIndex(backsnap.meta)
         indexblob = json.dumps(index.to_map()).encode('utf8')
         now = datetime.utcnow()
         fsguid = backsnap.meta.key.fsguid
@@ -114,8 +138,8 @@ class LocalStorage:
         backsnap.set_indexes(indexes)
 
     # TODO, this should grab the snapshot based on creation date,
-    # possibly use an xattr to store the LocalIndex structure
+    # possibly use an xattr to store the FsIndex structure
     def get_current_meta(self, fsguid, id_):
         with open(self._get_index_nodepath(fsguid, id_, 'current')) as in_:
             indexblob = in_.read()
-        return LocalIndex.from_map(json.loads(indexblob)).meta
+        return FsIndex.from_map(json.loads(indexblob)).meta

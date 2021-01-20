@@ -8,6 +8,32 @@ from datetime import datetime
 
 from .common import VERSION, Meta
 
+class S3Meta:
+
+    def __init__(self, bucket, prefix):
+        self.bucket = bucket
+        self.prefix = prefix
+
+    def __eq__(self, other):
+        if not isinstance(other, S3Meta):
+            return False
+        if other.bucket != self.bucket:
+            return False
+        if other.prefix != self.prefix:
+            return False
+        return True
+
+    def to_map(self):
+        return {
+            'type': 's3',
+            'bucket': self.bucket,
+            'prefix': self.prefix
+        }
+
+    @staticmethod
+    def from_map(metamap):
+        return S3Meta(metamap['bucket'], metamap['prefix'])
+
 class S3Index:
 
     def __init__(self, meta):
@@ -23,12 +49,13 @@ class S3Index:
         meta = Meta.from_map(indexmap['meta'])
         return S3Index(meta)
 
-class S3Storage:
+class S3Remote:
 
     def __init__(self, s3, bucket, prefix):
         self.s3 = s3
         self.bucket = bucket
         self.prefix = prefix
+        self.meta = S3Meta(bucket, prefix)
 
     def _get_data_path(self, metakey):
         id_ = metakey.id_
