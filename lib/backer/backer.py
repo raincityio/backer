@@ -313,10 +313,12 @@ def main():
 
     action = args.action
     if action == 'backup':
-        fs, remote, id_ = get_backup(args.n)
+        backup_name = args.n
+        fs, remote, id_ = get_backup(backup_name)
         backup(fs, remote, id_, force=args.force) 
     elif action == 'index':
-        fs, remote, id_ = get_backup(args.n)
+        backup_name = args.n
+        fs, remote, id_ = get_backup(backup_name)
         index(fs, remote, id_)
     elif action == 'backup-all':
         for backup_name in cfg.list_backups():
@@ -335,7 +337,8 @@ def main():
         id_ = args.i
         restore(local, remote, meta_discovery, fsguid, id_, restore_fsname)
     elif action == 'list':
-        for meta in get_remote(args.r).list():
+        remote = get_remote(args.r)
+        for meta in remote.list():
             print(meta)
     elif action == 'daemon':
         period = cfg.get('daemon:period', default=60)
