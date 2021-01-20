@@ -212,18 +212,34 @@ def main():
     logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', default='/usr/local/etc/backer.json', help='config')
-    parser.add_argument('--backup', help='backup')
-    parser.add_argument('--index', help='index')
-    parser.add_argument('--force', action='store_true', help='force')
-    parser.add_argument('--backup-all', action='store_true', help='backup all')
-    parser.add_argument('--index-all', action='store_true', help='index all')
-    parser.add_argument('--list', action='store_true', help='list')
-    parser.add_argument('--restore', nargs=2, help='restore')
-    parser.add_argument('--remote', help='remote')
-    parser.add_argument('--local', help='local')
-    parser.add_argument('--id', default='default', help='backup id')
-    parser.add_argument('--daemon', action='store_true', help='daemon')
+    parser.add_argument('-c', default='/usr/local/etc/backer.json', metavar='config')
+
+    subparsers = parser.add_subparsers(dest='action')
+    
+    backup_parser = subparsers.add_parser('backup')
+    backup_parser.add_argument('-n', metavar='[backup name]', required=True)
+    backup_parser.add_argument('--force', action='store_true')
+
+    index_parser = subparsers.add_parser('index')
+    index_parser.add_argument('-n', metavar='[backup name]', required=True)
+
+    backup_all_parser = subparsers.add_parser('backup-all')
+    backup_all_parser.add_argument('--force', action='store_true')
+
+    subparsers.add_parser('index-all')
+
+    list_parser = subparsers.add_parser('list')
+    list_parser.add_argument('-r', metavar='remote')
+
+    restore_parser = subparsers.add_parser('restore')
+    restore_parser.add_argument('-l', metavar='local')
+    restore_parser.add_argument('-r', metavar='remote')
+    restore_parser.add_argument('-i', default='default', metavar='id')
+    restore_parser.add_argument('-g', metavar='fsguid', required=True)
+    restore_parser.add_argument('-f', metavar='fsname', required=True)
+
+    subparsers.add_parser('daemon') 
+
     args = parser.parse_args()
 
     cfg = Config(filename=args.c)
@@ -295,43 +311,41 @@ def main():
         backups[backup_name] = backup
         return backup
 
-    if args.backup:
-        backup_name = args.backup
-        fs, remote, id_ = get_backup(backup_name)
+    action = args.action
+    if action == 'backup':
+        fs, remote, id_ = get_backup(args.n)
         backup(fs, remote, id_, force=args.force) 
-    elif args.index:
-        backup_name = args.index
-        fs, remote, id_ = get_backup(backup_name)
+    elif action == 'index':
+        fs, remote, id_ = get_backup(args.n)
         index(fs, remote, id_)
-    elif args.backup_all:
+    elif action == 'backup-all':
         for backup_name in cfg.list_backups():
             fs, remote, id_ = get_backup(backup_name)
             backup(fs, remote, id_, force=args.force)
-    elif args.index_all:
+    elif action == 'index-all':
         for backup_name in cfg.list_backups():
             fs, remote, id_ = get_backup(backup_name)
             index(fs, remote, id_)
-    elif args.restore:
-# TODO
-        fsguid = args.restore[0]
-        restore_fsname = args.restore[1]
-        local = get_local(args.local)
-        remote = get_remote(args.remote)
+    elif action == 'restore':
+        fsguid = args.g
+        restore_fsname = args.f
+        local = get_local(args.l)
+        remote = get_remote(args.r)
         meta_discovery = remote.get_current_meta
-        id_ = args.id
+        id_ = args.i
         restore(local, remote, meta_discovery, fsguid, id_, restore_fsname)
-    elif args.list:
-        for meta in get_remote(args.remote).list():
+    elif action == 'list':
+        for meta in get_remote(args.r).list():
             print(meta)
-    elif args.daemon:
+    elif action == 'daemon':
         period = cfg.get('daemon:period', default=60)
         finished = threading.Event()
 
         def indexer_daemon():
             while not finished.is_set():
                 for backup_name in cfg.list_backups():
+                    fs, remote, id_ = get_backup(backup_name)
                     try: 
-                        fs, remote, id_ = get_backup(backup_name)
                         index(fs, remote, id_)
                     except Exception as e:
                         logging.exception(e)
@@ -341,8 +355,8 @@ def main():
         def backer_daemon():
             while not finished.is_set():
                 for backup_name in cfg.list_backups():
+                    fs, remote, id_ = get_backup(backup_name)
                     try:
-                        fs, remote, id_ = get_backup(backup_name)
                         backup(fs, remote, id_)
                     except Exception as e:
                         logging.exception(e)
