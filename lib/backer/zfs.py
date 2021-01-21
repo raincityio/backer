@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import tempfile
+import shutil
 import os
 import socket
 import time
@@ -79,17 +79,13 @@ class Snapshot:
                 key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
 
-    def send(self, output, *, other=None):
+    def send(self, streamer, *, other=None):
         if other is None:
             args = ['zfs', "send", "-p", self.name]
         else:
             args = ['zfs', "send", "-p", "-i", other.name, self.name]
         with subprocess.Popen(args, stdout=subprocess.PIPE) as proc:
-            while True:
-                data = proc.stdout.read(65536)
-                if len(data) == 0:
-                    break
-                output.write(data)
+            streamer(proc.stdout)
             rc = proc.wait()
         if rc != 0:
             raise Exception(rc)
@@ -212,14 +208,10 @@ def get_filesystem(name):
         raise Exception("unknown filesystem: %s" % name)
     return Filesystem(name)
 
-def recv(name, stream):
+def recv(name, streamer):
     args = ['zfs', "recv", "-u", name]
     with subprocess.Popen(args, stdin=subprocess.PIPE) as proc:
-        while True:
-            data = stream.read(65536)
-            if len(data) == 0:
-                break
-            proc.stdin.write(data)
+        streamer(proc.stdin)
         proc.stdin.close()
         rc = proc.wait()
     if rc != 0:

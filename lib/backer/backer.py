@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
+import fcntl
 import uuid
 import os
 import argparse
 import json
-import tempfile
 import logging
 import threading
 import signal
@@ -117,7 +117,24 @@ def index(fs, remote, id_):
     if latest is not None:
         remote.index(latest)
 
+try:
+    os.makedirs('/var/run/backer')
+except FileExistsError:
+    pass
 def backup(fs, remote, id_, *, force=False):
+    # TODO, take out a lock to prevent concurrent run
+    # race conditions.  overlapping runs where one process
+    # freezes may reupload a snapshot by the same number
+    # if a gap is found where there wasn't one before.  this
+    # is extremely unlikely, almost impossible, but taking
+    # a lock out eliminates this issue.
+    lock_filename = "/var/run/backer/backer-%s-%s-%s.lock" % \
+            (VERSION, fs.get('guid'), id_)
+    with open(lock_filename, 'w') as lock_file:
+        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _backup(fs, remote, id_, force=force)
+
+def _backup(fs, remote, id_, *, force=False):
     backsnaps = get_backsnaps(fs, id_)
     if len(backsnaps) == 0:
         metakey = Meta.Key(str(fs.get('guid')), id_, 0)
@@ -133,14 +150,12 @@ def backup(fs, remote, id_, *, force=False):
     previous = None
     for backsnap in backsnaps:
         if not backsnap.is_stored():
-            with tempfile.TemporaryFile() as out:
-                if previous is None:
-                    backsnap.snapshot.send(out)
-                else:
-                    backsnap.snapshot.send(out, other=previous.snapshot)
-                out.flush()
-                out.seek(0)
-                remote.put_data(backsnap.meta.key, out)
+            def streamer(stream, backsnap=backsnap):
+                remote.put_data(backsnap.meta.key, stream)
+            if previous is None:
+                backsnap.snapshot.send(streamer)
+            else:
+                backsnap.snapshot.send(streamer, other=previous.snapshot)
             remote.index(backsnap)
             backsnap.set_stored(True)
         if previous is not None:
@@ -154,12 +169,11 @@ def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
     fsguid = latest_meta.key.fsguid
     for n in range(latest_meta.key.n+1):
         metakey = Meta.Key(fsguid, id_, n)
+        def streamer(stream, metakey=metakey):
+            remote.get_data(metakey, stream)
         logging.debug("restore recv %s" % metakey)
-        with tempfile.TemporaryFile() as out:
-            remote.get_data(metakey, out)
-            out.flush()
-            out.seek(0)
-            local.recv(restore_fsname, out)
+        local.recv(restore_fsname, streamer)
+
     fs = local.get_filesystem(restore_fsname)
     for name in fs.list_snapshots():
         snapshot = fs.get_snapshot(name)
@@ -208,6 +222,14 @@ class Config:
         except KeyError:
             return False
         return True
+
+def acquire_lock(fsguid, id_):
+    lock_file = open(filename, 'w')
+    fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return lock_file
+
+def release_lock(lock_file):
+    lock_file.close()
 
 def main():
     logging.basicConfig(level=logging.INFO)

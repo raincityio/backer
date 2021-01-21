@@ -3,7 +3,6 @@
 import os
 import shutil
 import json
-import tempfile
 import logging
 from datetime import datetime
 
@@ -45,10 +44,7 @@ class FsIndex:
         return FsIndex(meta)
 
 def mkdirs(path):
-    try:
-        os.makedirs(path)
-    except FileExistsError:
-        pass
+    os.makedirs(path, exist_ok=True)
 
 class FsRemote:
 
@@ -89,7 +85,9 @@ class FsRemote:
 
     def put_data(self, metakey, stream):
         logging.debug("fs put %s" % metakey)
-        with open(self._get_data_nodepath(metakey), 'wb') as out:
+        fh = os.open(self._get_data_nodepath(metakey),
+                os.O_CREAT | os.O_WRONLY, 0o600)
+        with open(fh, 'wb') as out:
             shutil.copyfileobj(stream, out)
 
     def get_data(self, metakey, stream):
