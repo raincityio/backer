@@ -79,6 +79,9 @@ class Snapshot:
                 key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
 
+    def get_creation(self):
+        return int(str(self.get('creation')))
+
     def send(self, streamer, *, other=None):
         if other is None:
             args = ['zfs', "send", "-p", self.name]
@@ -160,8 +163,11 @@ class Filesystem:
         return snapshots
 
     def get(self, key):
-        output = check_output(['zfs', 'get', '-H', '-o', 'value', key, self.name])
+        output = check_output(['zfs', 'get', '-p', '-H', '-o', 'value', key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
+
+    def get_creation(self):
+        return int(str(self.get('creation')))
 
     def get_all(self):
         props = {}

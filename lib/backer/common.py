@@ -3,63 +3,62 @@
 import time
 import socket
 
-VERSION='7'
+VERSION='7c'
 
 class Meta:
 
     class Key:
 
-        def __init__(self, fsguid, id_, n):
+        def __init__(self, fsguid, id_, sid, n):
             self.fsguid = fsguid
             self.id_ = id_
+            self.sid = str(sid).replace('-', '')
             self.n = n
 
         def to_map(self):
             return {
                 'fsguid': self.fsguid,
                 'id': self.id_,
+                'sid': self.sid,
                 'n': self.n
             }
 
         def __str__(self):
-            return "[fsguid=%s, id=%s, n=%s]" % (self.fsguid, self.id_, self.n)
+            return "[fsguid=%s, id=%s, sid=%s, n=%s]" % (self.fsguid, self.id_, self.sid, self.n)
 
         @staticmethod
         def from_map(keymap):
-            return Meta.Key(keymap['fsguid'], keymap['id'], keymap['n'])
+            return Meta.Key(keymap['fsguid'], keymap['id'], keymap['sid'], keymap['n'])
 
-    def __init__(self, key, fsname, created, version, hostname, base):
+    def __init__(self, key, fsname, fscreation, hostname, creation):
         self.key = key
         self.fsname = fsname
-        self.created = created
-        self.version = version
+        self.fscreation = fscreation
         self.hostname = hostname
-        self.base = base
+        self.creation = creation
 
     def __str__(self):
-        return "[key=%s, fsname=%s, created=%s, version=%s, hostname=%s, base=%s]" % \
-            (self.key, self.fsname, self.created, self.version, self.hostname, self.base)
+        return "[key=%s, fsname=%s, fscreation=%s, hostname=%s, creation=%s]" % \
+            (self.key, self.fsname, self.fscreation, self.hostname, self.creation)
 
     def to_map(self):
         return {
             'key': self.key.to_map(),
             'fsname': self.fsname,
-            'created': self.created,
-            'version': self.version,
+            'fscreation': self.fscreation,
             'hostname': self.hostname,
-            'base': self.base
+            'creation': self.creation
         }
 
     @staticmethod
     def from_map(metamap):
         key = Meta.Key.from_map(metamap['key'])
         fsname = metamap['fsname']
-        created = metamap['created']
-        version = metamap['version']
+        fscreation = metamap['fscreation']
         hostname = metamap['hostname']
-        base = metamap['base']
-        return Meta(key, fsname, created, version, hostname, base)
+        creation = metamap['creation']
+        return Meta(key, fsname, fscreation, hostname, creation)
 
     @staticmethod
     def create(fs, key):
-        return Meta(key, fs.name, time.time(), VERSION, socket.gethostname(), 0)
+        return Meta(key, fs.name, fs.get_creation(), socket.gethostname(), time.time())

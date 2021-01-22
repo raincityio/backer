@@ -81,7 +81,7 @@ class Backsnap:
 
     @staticmethod
     def name(metakey):
-        return "backer:%s-%s-%s" % (VERSION, metakey.id_, metakey.n)
+        return "backer:%s-%s-%s-%s" % (VERSION, metakey.id_, metakey.sid, metakey.n)
 
     @staticmethod
     def create(fs, remote, metakey):
@@ -104,7 +104,7 @@ def get_backsnaps(fs, id_):
         if backsnap.meta.key.id_ != id_:
             continue
         backsnaps.append(backsnap)
-    return sorted(backsnaps, key=lambda x: x.meta.key.n)
+    return sorted(backsnaps, key=lambda x: x.snapshot.get_creation())
 
 def get_latest_stored(fs, id_):
     backsnaps = list(filter(lambda x: x.is_stored(), get_backsnaps(fs, id_)))
@@ -137,18 +137,21 @@ def backup(fs, remote, id_, *, force=False):
 def _backup(fs, remote, id_, *, force=False):
     backsnaps = get_backsnaps(fs, id_)
     if len(backsnaps) == 0:
-        metakey = Meta.Key(str(fs.get('guid')), id_, 0)
+        metakey = Meta.Key(str(fs.get('guid')), id_, uuid.uuid4(), 0)
         backsnaps.append(Backsnap.create(fs, remote, metakey))
     else:
         latest = backsnaps[-1]
+        # only consider a list by latest sid
+        backsnaps = list(filter(lambda x: x.meta.key.sid == latest.meta.key.sid, backsnaps))
         if force or (not latest.snapshot.check_is_current()):
-            metakey = Meta.Key(str(fs.get('guid')), id_, latest.meta.key.n+1)
+            metakey = Meta.Key(str(fs.get('guid')), id_, latest.meta.key.sid, latest.meta.key.n+1)
             if remote.meta != latest.get_remote_meta():
                 raise Exception("incompatible remote: %s" % remote.meta)
             backsnaps.append(Backsnap.create(fs, remote, metakey))
 
     previous = None
-    for backsnap in backsnaps:
+    for i in range(len(backsnaps)):
+        backsnap = backsnaps[i]
         if not backsnap.is_stored():
             def streamer(stream, backsnap=backsnap):
                 remote.put_data(backsnap.meta.key, stream)
@@ -156,7 +159,9 @@ def _backup(fs, remote, id_, *, force=False):
                 backsnap.snapshot.send(streamer)
             else:
                 backsnap.snapshot.send(streamer, other=previous.snapshot)
-            remote.index(backsnap)
+            # only index last one
+            if i == (len(backsnaps) - 1):
+                remote.index(backsnap)
             backsnap.set_stored(True)
         if previous is not None:
             previous.snapshot.destroy()
@@ -167,17 +172,13 @@ def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
     if latest_meta is None:
         raise Exception("latest not found")
     fsguid = latest_meta.key.fsguid
+    sid = latest_meta.key.sid
     for n in range(latest_meta.key.n+1):
-        metakey = Meta.Key(fsguid, id_, n)
+        metakey = Meta.Key(fsguid, id_, sid, n)
         def streamer(stream, metakey=metakey):
             remote.get_data(metakey, stream)
         logging.debug("restore recv %s" % metakey)
         local.recv(restore_fsname, streamer)
-
-    fs = local.get_filesystem(restore_fsname)
-    for name in fs.list_snapshots():
-        snapshot = fs.get_snapshot(name)
-        snapshot.destroy()
 
 _none = uuid.uuid4()
 class Config:
