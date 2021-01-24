@@ -17,38 +17,32 @@ STATE_PROP = "backer:state"
 
 class State:
 
-    def __init__(self, meta, stored, indexes, remote_meta):
+    def __init__(self, meta, stored, remote_type, remote_cfg, remote_state):
         self.meta = meta
         self.stored = stored
-        self.indexes = indexes
-        self.remote_meta = remote_meta
+        self.remote_type = remote_type
+        self.remote_cfg = remote_cfg
+        self.remote_state = remote_state
 
     def to_map(self):
         return {
             'meta': self.meta.to_map(),
             'stored': self.stored,
-            'indexes': self.indexes,
-            'remote': self.remote_meta.to_map()
+            'remote_type': self.remote_type,
+            'remote_cfg': self.remote_cfg,
+            'remote_state': self.remote_state
         }
 
     @staticmethod
     def from_map(statemap):
         meta = Meta.from_map(statemap['meta'])
-        remote_type = statemap['remote']['type']
-        if remote_type == 'fs':
-            from .fs import FsMeta
-            RemoteMeta = FsMeta
-        elif remote_type == 's3':
-            from .s3 import S3Meta
-            RemoteMeta = S3Meta
-        else:
-            raise Exception("unknown remote: %s" % remote_type)
-        remote_meta = RemoteMeta.from_map(statemap['remote'])
-        return State(meta, statemap['stored'], statemap['indexes'], remote_meta)
+        return State(meta, statemap['stored'], statemap['remote_type'], 
+                statemap['remote_cfg'], statemap['remote_state'])
 
     @staticmethod
     def create(fs, metakey, remote):
-        return State(Meta.create(fs, metakey), False, {}, remote.meta)
+        return State(Meta.create(fs, metakey), False,
+                remote.type_, remote.cfg, None)
         
 class Backsnap:
 
@@ -58,14 +52,19 @@ class Backsnap:
         self._state = State.from_map(json.loads(statedata))
         self.meta = self._state.meta
 
-    def get_remote_meta(self):
-        return self._state.remote_meta
+    # ensure that the remote provided is compatible with
+    # the remote in this backsnap
+    def validate_remote(self, remote):
+        if remote.type_ != self._state.remote_type:
+            raise Exception("invalid remote")
+        if remote.cfg != self._state.remote_cfg:
+            raise Exception("invalid remote")
 
-    def get_indexes(self):
-        return self._state.indexes
+    def get_remote_state(self):
+        return self._state.remote_state
 
-    def set_indexes(self, indexes):
-        self._state.indexes = indexes
+    def set_remote_state(self, remote_state):
+        self._state.remote_state = remote_state
         self._apply_state()
 
     def is_stored(self):
@@ -117,17 +116,8 @@ def index(fs, remote, id_):
     if latest is not None:
         remote.index(latest)
 
-try:
-    os.makedirs('/var/run/backer')
-except FileExistsError:
-    pass
+os.makedirs('/var/run/backer', exist_ok=True)
 def backup(fs, remote, id_, *, force=False):
-    # TODO, take out a lock to prevent concurrent run
-    # race conditions.  overlapping runs where one process
-    # freezes may reupload a snapshot by the same number
-    # if a gap is found where there wasn't one before.  this
-    # is extremely unlikely, almost impossible, but taking
-    # a lock out eliminates this issue.
     lock_filename = "/var/run/backer/backer-%s-%s-%s.lock" % \
             (VERSION, fs.get('guid'), id_)
     with open(lock_filename, 'w') as lock_file:
@@ -145,8 +135,7 @@ def _backup(fs, remote, id_, *, force=False):
         backsnaps = list(filter(lambda x: x.meta.key.sid == latest.meta.key.sid, backsnaps))
         if force or (not latest.snapshot.check_is_current()):
             metakey = Meta.Key(str(fs.get('guid')), id_, latest.meta.key.sid, latest.meta.key.n+1)
-            if remote.meta != latest.get_remote_meta():
-                raise Exception("incompatible remote: %s" % remote.meta)
+            latest.validate_remote(remote)
             backsnaps.append(Backsnap.create(fs, remote, metakey))
 
     previous = None
@@ -159,6 +148,7 @@ def _backup(fs, remote, id_, *, force=False):
                 backsnap.snapshot.send(streamer)
             else:
                 backsnap.snapshot.send(streamer, other=previous.snapshot)
+            remote.put_meta(backsnap.meta)
             # only index last one
             if i == (len(backsnaps) - 1):
                 remote.index(backsnap)
