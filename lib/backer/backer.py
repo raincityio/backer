@@ -90,9 +90,8 @@ class Backsnap:
                 STATE_PROP: fs.Value(json.dumps(state.to_map()))})
         return Backsnap(snapshot)
 
-# return list of backsnaps sort in ascending order
-def get_backsnaps(fs, id_):
-    backsnaps = []
+def get_all_backsnaps(fs, id_):
+    unsorted_backsnaps = {}
     for name, props in fs.list_snapshots(keys=[VERSION_PROP]).items():
         if VERSION_PROP not in props:
             continue
@@ -102,11 +101,30 @@ def get_backsnaps(fs, id_):
         backsnap = Backsnap(snapshot)
         if backsnap.meta.key.id_ != id_:
             continue
-        backsnaps.append(backsnap)
-    return sorted(backsnaps, key=lambda x: x.snapshot.get_creation())
+        sid = backsnap.meta.key.sid
+        if sid not in unsorted_backsnaps:
+            unsorted_backsnaps[sid] = []
+        unsorted_backsnaps[sid].append(backsnap)
+    sorted_backsnaps = {}
+    for sid, backsnaps in unsorted_backsnaps.items():
+        sorted_backsnaps[sid] = sorted(backsnaps, key=lambda x: x.snapshot.get_creation())
+    return sorted_backsnaps
+
+# latest is the list of backsnaps which also has a
+# backsnap with the most recent creation
+def get_latest_backsnaps(fs, id_):
+    all_backsnaps = get_all_backsnaps(fs, id_)
+    latest_backsnap = None
+    for sid, backsnaps in all_backsnaps.items():
+        if (latest_backsnap is None) or \
+                (latest_backsnap.snapshot.get_creation() < backsnaps[-1].snapshot.get_creation()):
+            latest_backsnap = backsnaps[-1]
+    if latest_backsnap is None:
+        return []
+    return all_backsnaps[latest_backsnap.meta.key.sid]
 
 def get_latest_stored(fs, id_):
-    backsnaps = list(filter(lambda x: x.is_stored(), get_backsnaps(fs, id_)))
+    backsnaps = list(filter(lambda x: x.is_stored(), get_latest_backsnaps(fs, id_)))
     if len(backsnaps) == 0:
         return None
     return backsnaps[-1]
@@ -125,16 +143,14 @@ def backup(fs, remote, id_, *, force=False):
         _backup(fs, remote, id_, force=force)
 
 def _backup(fs, remote, id_, *, force=False):
-    backsnaps = get_backsnaps(fs, id_)
+    backsnaps = get_latest_backsnaps(fs, id_)
     if len(backsnaps) == 0:
-        metakey = Meta.Key(str(fs.get('guid')), id_, uuid.uuid4(), 0)
+        metakey = Meta.Key.create(str(fs.get('guid')), id_)
         backsnaps.append(Backsnap.create(fs, remote, metakey))
     else:
         latest = backsnaps[-1]
-        # only consider a list by latest sid
-        backsnaps = list(filter(lambda x: x.meta.key.sid == latest.meta.key.sid, backsnaps))
         if force or (not latest.snapshot.check_is_current()):
-            metakey = Meta.Key(str(fs.get('guid')), id_, latest.meta.key.sid, latest.meta.key.n+1)
+            metakey = Meta.Key.from_key(latest.meta.key, n=latest.meta.key.n+1)
             latest.validate_remote(remote)
             backsnaps.append(Backsnap.create(fs, remote, metakey))
 
@@ -164,7 +180,7 @@ def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
     fsguid = latest_meta.key.fsguid
     sid = latest_meta.key.sid
     for n in range(latest_meta.key.n+1):
-        metakey = Meta.Key(fsguid, id_, sid, n)
+        metakey = Meta.Key.from_key(latest_meta.key, n=n)
         def streamer(stream, metakey=metakey):
             remote.get_data(metakey, stream)
         logging.debug("restore recv %s" % metakey)

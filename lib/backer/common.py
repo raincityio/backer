@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import uuid
 import time
 import socket
 
@@ -12,7 +13,7 @@ class Meta:
         def __init__(self, fsguid, id_, sid, n):
             self.fsguid = fsguid
             self.id_ = id_
-            self.sid = str(sid).replace('-', '')
+            self.sid = sid
             self.n = n
 
         def to_map(self):
@@ -29,6 +30,19 @@ class Meta:
         @staticmethod
         def from_map(keymap):
             return Meta.Key(keymap['fsguid'], keymap['id'], keymap['sid'], keymap['n'])
+
+        @staticmethod
+        def from_key(key, *, n=None):
+            if n is None:
+                kn = key.n
+            else:
+                kn = n
+            return Meta.Key(key.fsguid, key.id_, key.sid, kn)
+
+        @staticmethod
+        def create(fsguid, id_):
+            sid = str(uuid.uuid4()).replace('-', '')
+            return Meta.Key(fsguid, id_, sid, 0)
 
     def __init__(self, key, fsname, fscreation, hostname, creation):
         self.key = key
