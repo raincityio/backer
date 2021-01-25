@@ -5,7 +5,7 @@ import uuid
 import time
 import socket
 
-VERSION='7e'
+VERSION='8'
 
 class Meta:
 
