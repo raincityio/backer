@@ -178,8 +178,6 @@ def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
     latest_meta = meta_discovery(fsguid, id_)
     if latest_meta is None:
         raise Exception("latest not found")
-    fsguid = latest_meta.key.fsguid
-    sid = latest_meta.key.sid
     for n in range(latest_meta.key.n+1):
         metakey = Meta.Key.from_key(latest_meta.key, n=n)
         def streamer(stream, metakey=metakey):

@@ -124,7 +124,6 @@ class S3Remote:
             'year': self._get_index_metapath(fsguid, id_, "%s" % now.year),
             'month': self._get_index_metapath(fsguid, id_, "%s-%s" % (now.year, now.month)),
             'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),
-            'hour': self._get_index_metapath(fsguid, id_, "%s-%s-%s-%s" % (now.year, now.month, now.day, now.hour))
         }
         
         state = backsnap.get_remote_state()
