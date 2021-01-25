@@ -24,17 +24,18 @@ class State:
         self.remote_cfg = remote_cfg
         self.remote_state = remote_state
 
-    def to_map(self):
-        return {
+    def to_data(self):
+        return json.dumps({
             'meta': self.meta.to_map(),
             'stored': self.stored,
             'remote_type': self.remote_type,
             'remote_cfg': self.remote_cfg,
             'remote_state': self.remote_state
-        }
+        })
 
     @staticmethod
-    def from_map(statemap):
+    def from_data(data):
+        statemap = json.loads(data)
         meta = Meta.from_map(statemap['meta'])
         return State(meta, statemap['stored'], statemap['remote_type'], 
                 statemap['remote_cfg'], statemap['remote_state'])
@@ -49,7 +50,7 @@ class Backsnap:
     def __init__(self, snapshot):
         self.snapshot = snapshot
         statedata = str(snapshot.get(STATE_PROP))
-        self._state = State.from_map(json.loads(statedata))
+        self._state = State.from_data(statedata)
         self.meta = self._state.meta
 
     # ensure that the remote provided is compatible with
@@ -75,7 +76,7 @@ class Backsnap:
         self._apply_state()
 
     def _apply_state(self):
-        statedata = json.dumps(self._state.to_map())
+        statedata = self._state.to_data()
         self.snapshot.set(STATE_PROP, self.snapshot.Value(statedata))
 
     @staticmethod
@@ -87,7 +88,7 @@ class Backsnap:
         state = State.create(fs, metakey, remote)
         snapshot = fs.snapshot(Backsnap.name(metakey), props={
                 VERSION_PROP: fs.Value(VERSION),
-                STATE_PROP: fs.Value(json.dumps(state.to_map()))})
+                STATE_PROP: fs.Value(state.to_data())})
         return Backsnap(snapshot)
 
 def get_all_backsnaps(fs, id_):

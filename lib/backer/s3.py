@@ -2,7 +2,6 @@
 
 import os
 import io
-import json
 import logging
 import boto3
 from datetime import datetime
@@ -61,7 +60,7 @@ class S3Remote:
         self._put_meta(meta, self._get_data_metapath(meta.key))
 
     def _put_meta(self, meta, path):
-        metablob = json.dumps(meta.to_map()).encode('utf8')
+        metablob = meta.to_data().encode('utf8')
         metablob_f = io.BytesIO(metablob)
         self.s3.upload_fileobj(metablob_f, self.bucket, path)
 
@@ -79,7 +78,7 @@ class S3Remote:
         self.s3.download_fileobj(self.bucket, path, metablob_f)
         metablob_f.seek(0)
         metablob = metablob_f.read()
-        return Meta.from_map(json.loads(metablob.decode('utf8')))
+        return Meta.from_data(metablob.decode('utf8'))
 
     def _ls(self, path):
         names = []

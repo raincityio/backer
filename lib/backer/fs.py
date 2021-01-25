@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import json
 import logging
 from datetime import datetime
 
@@ -68,7 +67,7 @@ class FsRemote:
         self._put_meta(meta, self._get_data_metapath(meta.key))
 
     def _put_meta(self, meta, path):
-        metablob = json.dumps(meta.to_map()).encode('utf8')
+        metablob = meta.to_data().encode('utf8')
         with open(path, 'wb') as out:
             out.write(metablob)
 
@@ -83,7 +82,7 @@ class FsRemote:
     def _get_meta(self, path):
         with open(path, 'rb') as in_:
             metablob = in_.read()
-        return Meta.from_map(json.loads(metablob.decode('utf8')))
+        return Meta.from_data(metablob.decode('utf8'))
 
     def list(self):
         metas = []

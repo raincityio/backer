@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import uuid
 import time
 import socket
@@ -55,6 +56,9 @@ class Meta:
         return "[key=%s, fsname=%s, fscreation=%s, hostname=%s, creation=%s]" % \
             (self.key, self.fsname, self.fscreation, self.hostname, self.creation)
 
+    def to_data(self):
+        return json.dumps(self.to_map())
+
     def to_map(self):
         return {
             'key': self.key.to_map(),
@@ -63,6 +67,10 @@ class Meta:
             'hostname': self.hostname,
             'creation': self.creation
         }
+
+    @staticmethod
+    def from_data(data):
+        return Meta.from_map(json.loads(data))
 
     @staticmethod
     def from_map(metamap):
