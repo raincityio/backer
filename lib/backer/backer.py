@@ -130,49 +130,57 @@ def get_latest_stored(fs, id_):
         return None
     return backsnaps[-1]
 
-def index(fs, remote, id_):
-    latest = get_latest_stored(fs, id_)
-    if latest is not None:
-        remote.index(latest)
+class Backup:
 
-os.makedirs('/var/run/backer', exist_ok=True)
-def backup(fs, remote, id_, *, force=False):
-    lock_filename = "/var/run/backer/backer-%s-%s-%s.lock" % \
-            (VERSION, fs.get('guid'), id_)
-    with open(lock_filename, 'w') as lock_file:
-        fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _backup(fs, remote, id_, force=force)
+    def __init__(self, fs, remote, id_, period):
+        self.fs = fs
+        self.remote = remote
+        self.id_ = id_
+        self.period = period
+        os.makedirs('/var/run/backer', exist_ok=True)
 
-def _backup(fs, remote, id_, *, force=False):
-    backsnaps = get_latest_backsnaps(fs, id_)
-    if len(backsnaps) == 0:
-        metakey = Meta.Key.create(str(fs.get('guid')), id_)
-        backsnaps.append(Backsnap.create(fs, remote, metakey))
-    else:
-        latest = backsnaps[-1]
-        if force or (not latest.snapshot.check_is_current()):
-            metakey = Meta.Key.from_key(latest.meta.key, n=latest.meta.key.n+1)
-            latest.validate_remote(remote)
-            backsnaps.append(Backsnap.create(fs, remote, metakey))
+    def index(self):
+        latest = get_latest_stored(self.fs, self.id_)
+        if latest is not None:
+            self.remote.index(latest)
 
-    previous = None
-    for i in range(len(backsnaps)):
-        backsnap = backsnaps[i]
-        if not backsnap.is_stored():
-            def streamer(stream, backsnap=backsnap):
-                remote.put_data(backsnap.meta.key, stream)
-            if previous is None:
-                backsnap.snapshot.send(streamer)
-            else:
-                backsnap.snapshot.send(streamer, other=previous.snapshot)
-            remote.put_meta(backsnap.meta)
-            # only index last one
-            if i == (len(backsnaps) - 1):
-                remote.index(backsnap)
-            backsnap.set_stored(True)
-        if previous is not None:
-            previous.snapshot.destroy()
-        previous = backsnap
+    def backup(self, *, force=False):
+        lock_filename = "/var/run/backer/backer-%s-%s-%s.lock" % \
+                (VERSION, self.fs.get('guid'), self.id_)
+        with open(lock_filename, 'w') as lock_file:
+            fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._backup(force=force)
+    
+    def _backup(self, *, force=False):
+        backsnaps = get_latest_backsnaps(self.fs, self.id_)
+        if len(backsnaps) == 0:
+            metakey = Meta.Key.create(str(self.fs.get('guid')), self.id_)
+            backsnaps.append(Backsnap.create(self.fs, self.remote, metakey))
+        else:
+            latest = backsnaps[-1]
+            if force or (not latest.snapshot.check_is_current()):
+                metakey = Meta.Key.from_key(latest.meta.key, n=latest.meta.key.n+1)
+                latest.validate_remote(self.remote)
+                backsnaps.append(Backsnap.create(self.fs, self.remote, metakey))
+    
+        previous = None
+        for i in range(len(backsnaps)):
+            backsnap = backsnaps[i]
+            if not backsnap.is_stored():
+                def streamer(stream, backsnap=backsnap):
+                    self.remote.put_data(backsnap.meta.key, stream)
+                if previous is None:
+                    backsnap.snapshot.send(streamer)
+                else:
+                    backsnap.snapshot.send(streamer, other=previous.snapshot)
+                self.remote.put_meta(backsnap.meta)
+                # only index last one
+                if i == (len(backsnaps) - 1):
+                    self.remote.index(backsnap)
+                backsnap.set_stored(True)
+            if previous is not None:
+                previous.snapshot.destroy()
+            previous = backsnap
             
 def restore(local, remote, meta_discovery, fsguid, id_, restore_fsname):
     latest_meta = meta_discovery(fsguid, id_)
@@ -228,14 +236,6 @@ class Config:
         except KeyError:
             return False
         return True
-
-def acquire_lock(fsguid, id_):
-    lock_file = open(filename, 'w')
-    fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    return lock_file
-
-def release_lock(lock_file):
-    lock_file.close()
 
 def main():
     logging.basicConfig(level=logging.INFO)
@@ -340,27 +340,24 @@ def main():
         fsname = cfg["backups.%s.fs:name" % backup_name]
         id_ = cfg.get("backups.%s.id" % backup_name, default='default')
         fs = local.get_filesystem(fsname)
-        backup = (fs, remote, id_,)
+        period = cfg.get("backups.%s.period" % backup_name, default=60)
+        backup = Backup(fs, remote, id_, period)
         backups[backup_name] = backup
         return backup
 
     action = args.action
     if action == 'backup':
         backup_name = args.n
-        fs, remote, id_ = get_backup(backup_name)
-        backup(fs, remote, id_, force=args.force) 
+        get_backup(backup_name).backup(force=args.force)
     elif action == 'index':
         backup_name = args.n
-        fs, remote, id_ = get_backup(backup_name)
-        index(fs, remote, id_)
+        get_backup(backup_name).index()
     elif action == 'backup-all':
         for backup_name in cfg.list_backups():
-            fs, remote, id_ = get_backup(backup_name)
-            backup(fs, remote, id_, force=args.force)
+            get_backup(backup_name).backup(force=args.force)
     elif action == 'index-all':
         for backup_name in cfg.list_backups():
-            fs, remote, id_ = get_backup(backup_name)
-            index(fs, remote, id_)
+            get_backup(backup_name).index()
     elif action == 'restore':
         fsguid = args.g
         restore_fsname = args.f
@@ -374,28 +371,34 @@ def main():
         for meta in remote.list():
             print(meta)
     elif action == 'daemon':
-        period = cfg.get('daemon:period', default=60)
         finished = threading.Event()
 
         def indexer_daemon():
+            period = cfg.get('indexer:period', default=60)
             while not finished.is_set():
                 for backup_name in cfg.list_backups():
-                    fs, remote, id_ = get_backup(backup_name)
+                    backup = get_backup(backup_name)
                     try: 
-                        index(fs, remote, id_)
+                        backup.index()
                     except Exception as e:
                         logging.exception(e)
                 if finished.wait(timeout=period):
                     break
 
         def backer_daemon():
+            backup_times = {}
+            for backup_name in cfg.list_backups():
+                backup = get_backup(backup_name)
+                backup_times[backup_name] = (backup, backup.period,)
             while not finished.is_set():
-                for backup_name in cfg.list_backups():
-                    fs, remote, id_ = get_backup(backup_name)
-                    try:
-                        backup(fs, remote, id_)
-                    except Exception as e:
-                        logging.exception(e)
+                for backup_name, (backup, next_) in backup_times.items():
+                    if next_ < time.time():
+                        try:
+                            backup.backup()
+                            next_ = time.time() + backup.period
+                            backup_times[backup_name] = (backup, next_,)
+                        except Exception as e:
+                            logging.exception(e)
                 if finished.wait(timeout=period):
                     break
 
