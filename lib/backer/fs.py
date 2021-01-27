@@ -114,8 +114,6 @@ class FsRemote:
         id_ = backsnap.meta.key.id_
         named_indexes = {
             'current': self._get_index_metapath(fsguid, id_, "current", make=True),
-            'year': self._get_index_metapath(fsguid, id_, "%s" % now.year, make=True),
-            'month': self._get_index_metapath(fsguid, id_, "%s-%s" % (now.year, now.month), make=True),
             'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
         }
         

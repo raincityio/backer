@@ -134,8 +134,6 @@ class S3Remote:
         id_ = backsnap.meta.key.id_
         named_indexes = {
             'current': self._get_index_metapath(fsguid, id_, "current"),
-            'year': self._get_index_metapath(fsguid, id_, "%s" % now.year),
-            'month': self._get_index_metapath(fsguid, id_, "%s-%s" % (now.year, now.month)),
             'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),
         }
         
