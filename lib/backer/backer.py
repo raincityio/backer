@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import time
 import fcntl
 import uuid
 import os
@@ -399,7 +400,7 @@ def main():
                             backup_times[backup_name] = (backup, next_,)
                         except Exception as e:
                             logging.exception(e)
-                if finished.wait(timeout=period):
+                if finished.wait(60):
                     break
 
         def signal_handler(*args):

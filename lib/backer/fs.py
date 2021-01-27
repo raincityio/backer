@@ -3,6 +3,7 @@
 import os
 import shutil
 import logging
+import lzma
 from datetime import datetime
 
 from .common import VERSION, Meta
@@ -19,52 +20,59 @@ class FsRemote:
             'root': root
         }
 
-    def _get_path(self):
+    def _get_path(self, *, make=False):
         path = "%s/%s" % (self.root, VERSION)
-        os.makedirs(path, exist_ok=True)
+        if make:
+            os.makedirs(path, exist_ok=True)
         return path
 
-    def _get_fs_path(self, fsguid):
-        path = "%s/%s.fs" % (self._get_path(), fsguid)
-        os.makedirs(path, exist_ok=True)
+    def _get_fs_path(self, fsguid, *, make=False):
+        path = "%s/%s.fs" % (self._get_path(make=make), fsguid)
+        if make:
+            os.makedirs(path, exist_ok=True)
         return path
 
-    def _get_data_path(self, fsguid, id_, sid):
-        path = "%s/%s.backup/data/%s.series" % (self._get_fs_path(fsguid), id_, sid)
-        os.makedirs(path, exist_ok=True)
+    def _get_data_path(self, fsguid, id_, sid, *, make=False):
+        path = "%s/%s.backup/data/%s.series" % \
+                (self._get_fs_path(fsguid, make=make), id_, sid)
+        if make:
+            os.makedirs(path, exist_ok=True)
         return path
 
-    def _get_data_datapath(self, metakey):
+    def _get_data_datapath(self, metakey, *, make=False):
         id_ = metakey.id_
         fsguid = metakey.fsguid
         sid = metakey.sid
         n = metakey.n
-        return "%s/%s.data" % (self._get_data_path(fsguid, id_, sid), n)
+        return "%s/%s.data.xz" % (self._get_data_path(fsguid, id_, sid, make=make), n)
 
-    def _get_data_metapath(self, metakey):
+    def _get_data_metapath(self, metakey, *, make=False):
         id_ = metakey.id_
         fsguid = metakey.fsguid
         sid = metakey.sid
         n = metakey.n
-        return "%s/%s.meta" % (self._get_data_path(fsguid, id_, sid), n)
+        return "%s/%s.meta" % (self._get_data_path(fsguid, id_, sid, make=make), n)
 
-    def _get_index_path(self, fsguid, id_):
-        path = "%s/%s.backup/index" % (self._get_fs_path(fsguid), id_)
-        os.makedirs(path, exist_ok=True)
+    def _get_index_path(self, fsguid, id_, *, make=False):
+        path = "%s/%s.backup/index" % \
+                (self._get_fs_path(fsguid, make=make), id_)
+        if make:
+            os.makedirs(path, exist_ok=True)
         return path
 
-    def _get_index_metapath(self, fsguid, id_, nodename):
-        return "%s/%s.meta" % (self._get_index_path(fsguid, id_), nodename)
+    def _get_index_metapath(self, fsguid, id_, nodename, *, make=False):
+        return "%s/%s.meta" % (self._get_index_path(fsguid, id_, make=make), nodename)
 
     def put_data(self, metakey, stream):
         logging.debug("fs put %s" % metakey)
-        fh = os.open(self._get_data_datapath(metakey),
+        fh = os.open(self._get_data_datapath(metakey, make=True),
                 os.O_CREAT | os.O_WRONLY, 0o600)
         with open(fh, 'wb') as out:
-            shutil.copyfileobj(stream, out)
+            with lzma.LZMAFile(out, 'wb') as lzout:
+                shutil.copyfileobj(stream, lzout)
 
     def put_meta(self, meta):
-        self._put_meta(meta, self._get_data_metapath(meta.key))
+        self._put_meta(meta, self._get_data_metapath(meta.key, make=True))
 
     def _put_meta(self, meta, path):
         metablob = meta.to_data().encode('utf8')
@@ -73,7 +81,7 @@ class FsRemote:
 
     def get_data(self, metakey, stream):
         logging.debug("fs get %s" % metakey)
-        with open(self._get_data_datapath(metakey), 'rb') as in_:
+        with lzma.open(self._get_data_datapath(metakey), 'rb') as in_:
             shutil.copyfileobj(in_, stream)
 
     def get_meta(self, metakey):
@@ -105,10 +113,10 @@ class FsRemote:
         fsguid = backsnap.meta.key.fsguid
         id_ = backsnap.meta.key.id_
         named_indexes = {
-            'current': self._get_index_metapath(fsguid, id_, "current"),
-            'year': self._get_index_metapath(fsguid, id_, "%s" % now.year),
-            'month': self._get_index_metapath(fsguid, id_, "%s-%s" % (now.year, now.month)),
-            'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),
+            'current': self._get_index_metapath(fsguid, id_, "current", make=True),
+            'year': self._get_index_metapath(fsguid, id_, "%s" % now.year, make=True),
+            'month': self._get_index_metapath(fsguid, id_, "%s-%s" % (now.year, now.month), make=True),
+            'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
         }
         
         state = backsnap.get_remote_state()

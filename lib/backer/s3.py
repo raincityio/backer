@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import shutil
+import lzma
 import os
 import io
 import logging
 import boto3
 from datetime import datetime
+import tempfile
 
 from .common import VERSION, Meta
 
@@ -35,7 +38,7 @@ class S3Remote:
         id_ = metakey.id_
         sid = metakey.sid
         n = metakey.n
-        return "%s/%s.data" % (self._get_data_path(fsguid, id_, sid), n)
+        return "%s/%s.data.xz" % (self._get_data_path(fsguid, id_, sid), n)
 
     def _get_data_metapath(self, metakey):
         fsguid = metakey.fsguid
@@ -53,7 +56,12 @@ class S3Remote:
     def put_data(self, metakey, stream):
         logging.debug("s3 put data %s" % metakey)
         datapath = self._get_data_datapath(metakey)
-        self.s3.upload_fileobj(stream, self.bucket, datapath)
+        with tempfile.SpooledTemporaryFile(max_size=1_000_000) as lzfile:
+            with lzma.LZMAFile(lzfile, 'wb') as out:
+                shutil.copyfileobj(stream, out)
+            lzfile.flush()
+            lzfile.seek(0)
+            self.s3.upload_fileobj(lzfile, self.bucket, datapath)
 
     def put_meta(self, meta):
         logging.debug("s3 put meta %s" % meta.key)
@@ -67,7 +75,12 @@ class S3Remote:
     def get_data(self, metakey, stream):
         path = self._get_data_datapath(metakey)
         logging.debug("s3 get %s from %s" % (metakey, path))
-        self.s3.download_fileobj(self.bucket, path, stream)
+        with tempfile.SpooledTemporaryFile(max_size=1_000_000) as lzfile:
+            self.s3.download_fileobj(self.bucket, path, lzfile)
+            lzfile.flush()
+            lzfile.seek(0)
+            with lzma.LZMAFile(lzfile, 'rb') as in_:
+                shutil.copyfileobj(in_, stream)
 
     def get_meta(self, metakey):
         logging.debug("s3 get meta %s" % metakey)
