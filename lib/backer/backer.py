@@ -369,8 +369,10 @@ def main():
         restore(local, remote, meta_discovery, fsguid, id_, restore_fsname)
     elif action == 'list':
         remote = get_remote(args.r)
+        metas = []
         for meta in remote.list():
-            print(meta)
+            metas.append(meta.to_map())
+        print(json.dumps(metas, indent=2, sort_keys=True))
     elif action == 'daemon':
         finished = threading.Event()
 
