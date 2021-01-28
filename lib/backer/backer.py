@@ -394,7 +394,12 @@ def main():
             backup_times = {}
             for backup_name in cfg.list_backups():
                 backup = get_backup(backup_name)
-                backup_times[backup_name] = (backup, backup.period,)
+                latest = get_latest_stored(backup.fs, backup.id_)
+                if latest is None:
+                    next_ = 0
+                else:
+                    next_ = latest.snapshot.get_creation() + backup.period
+                backup_times[backup_name] = (backup, next_)
             while not finished.is_set():
                 for backup_name, (backup, next_) in backup_times.items():
                     if next_ < time.time():
