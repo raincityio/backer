@@ -261,6 +261,7 @@ def main():
 
     list_parser = subparsers.add_parser('list')
     list_parser.add_argument('-r', metavar='remote')
+    list_parser.add_argument('-f', metavar='fsname')
 
     restore_parser = subparsers.add_parser('restore')
     restore_parser.add_argument('-l', metavar='local')
@@ -371,7 +372,8 @@ def main():
         remote = get_remote(args.r)
         metas = []
         for meta in remote.list():
-            metas.append(meta.to_map())
+            if (not args.f) or (args.f == meta.fsname):
+                metas.append(meta.to_map())
         print(json.dumps(metas, indent=2, sort_keys=True))
     elif action == 'daemon':
         finished = threading.Event()
