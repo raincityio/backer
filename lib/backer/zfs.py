@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
+import time
 import shutil
 import os
 import socket
-import time
-import datetime
 import uuid
 import subprocess
 from subprocess import check_output
+from datetime import datetime
+
+def toutc(timestamp):
+    return timestamp + time.timezone
 
 class Value:
 
@@ -79,8 +82,9 @@ class Snapshot:
                 key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
 
+    # TODO return datetime with tz
     def get_creation(self):
-        return int(str(self.get('creation')))
+        return toutc(int(str(self.get('creation'))))
 
     def send(self, streamer, *, other=None):
         if other is None:
@@ -166,8 +170,9 @@ class Filesystem:
         output = check_output(['zfs', 'get', '-p', '-H', '-o', 'value', key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
 
+    # TODO return datetime with tz
     def get_creation(self):
-        return int(str(self.get('creation')))
+        return toutc(int(str(self.get('creation'))))
 
     def get_all(self):
         props = {}

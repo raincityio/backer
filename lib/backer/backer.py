@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import time
+import socket
 import fcntl
 import uuid
 import os
@@ -11,7 +11,7 @@ import threading
 import signal
 import yaml
 
-from .common import VERSION, Meta
+from .common import VERSION, Meta, utcnow
 
 VERSION_PROP = "backer:version"
 STATE_PROP = "backer:state"
@@ -42,9 +42,8 @@ class State:
                 statemap['remote_cfg'], statemap['remote_state'])
 
     @staticmethod
-    def create(fs, metakey, remote):
-        return State(Meta.create(fs, metakey), False,
-                remote.type_, remote.cfg, None)
+    def create(meta, remote):
+        return State(meta, False, remote.type_, remote.cfg, None)
         
 class Backsnap:
 
@@ -82,12 +81,12 @@ class Backsnap:
 
     @staticmethod
     def name(metakey):
-        return "backer:%s-%s-%s-%s" % (VERSION, metakey.id_, metakey.sid, metakey.n)
+        return "backer:%s-%s-%s-%s" % (VERSION, metakey.id, metakey.sid, metakey.n)
 
     @staticmethod
-    def create(fs, remote, metakey):
-        state = State.create(fs, metakey, remote)
-        snapshot = fs.snapshot(Backsnap.name(metakey), props={
+    def create(fs, remote, meta):
+        state = State.create(meta, remote)
+        snapshot = fs.snapshot(Backsnap.name(meta.key), props={
                 VERSION_PROP: fs.Value(VERSION),
                 STATE_PROP: fs.Value(state.to_data())})
         return Backsnap(snapshot)
@@ -101,7 +100,7 @@ def get_all_backsnaps(fs, id_):
             continue
         snapshot = fs.get_snapshot(name)
         backsnap = Backsnap(snapshot)
-        if backsnap.meta.key.id_ != id_:
+        if backsnap.meta.key.id != id_:
             continue
         sid = backsnap.meta.key.sid
         if sid not in unsorted_backsnaps:
@@ -109,7 +108,7 @@ def get_all_backsnaps(fs, id_):
         unsorted_backsnaps[sid].append(backsnap)
     sorted_backsnaps = {}
     for sid, backsnaps in unsorted_backsnaps.items():
-        sorted_backsnaps[sid] = sorted(backsnaps, key=lambda x: x.snapshot.get_creation())
+        sorted_backsnaps[sid] = sorted(backsnaps, key=lambda x: x.meta.creation)
     return sorted_backsnaps
 
 # latest is the list of backsnaps which also has a
@@ -119,7 +118,7 @@ def get_latest_backsnaps(fs, id_):
     latest_backsnap = None
     for sid, backsnaps in all_backsnaps.items():
         if (latest_backsnap is None) or \
-                (latest_backsnap.snapshot.get_creation() < backsnaps[-1].snapshot.get_creation()):
+                (latest_backsnap.meta.creation < backsnaps[-1].meta.creation):
             latest_backsnap = backsnaps[-1]
     if latest_backsnap is None:
         return []
@@ -155,14 +154,16 @@ class Backup:
     def _backup(self, *, force=False):
         backsnaps = get_latest_backsnaps(self.fs, self.id_)
         if len(backsnaps) == 0:
-            metakey = Meta.Key.create(str(self.fs.get('guid')), self.id_)
-            backsnaps.append(Backsnap.create(self.fs, self.remote, metakey))
+            meta = Meta.create(self.fs, self.id_)
+            backsnaps.append(Backsnap.create(self.fs, self.remote, meta))
         else:
             latest = backsnaps[-1]
             if force or (not latest.snapshot.check_is_current()):
                 metakey = Meta.Key.from_key(latest.meta.key, n=latest.meta.key.n+1)
+                meta = Meta.from_meta(latest.meta, key=metakey, fsname=self.fs.name,
+                        hostname=socket.gethostname())
                 latest.validate_remote(self.remote)
-                backsnaps.append(Backsnap.create(self.fs, self.remote, metakey))
+                backsnaps.append(Backsnap.create(self.fs, self.remote, meta))
     
         previous = None
         for i in range(len(backsnaps)):
@@ -398,14 +399,14 @@ def main():
                 if latest is None:
                     next_ = 0
                 else:
-                    next_ = latest.snapshot.get_creation() + backup.period
+                    next_ = latest.meta.creation + backup.period
                 backup_times[backup_name] = (backup, next_)
             while not finished.is_set():
                 for backup_name, (backup, next_) in backup_times.items():
-                    if next_ < time.time():
+                    if next_ < utcnow():
                         try:
                             backup.backup()
-                            next_ = time.time() + backup.period
+                            next_ = next_ + backup.period
                             backup_times[backup_name] = (backup, next_,)
                         except Exception as e:
                             logging.exception(e)

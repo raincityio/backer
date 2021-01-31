@@ -6,8 +6,8 @@ import os
 import io
 import logging
 import boto3
-from datetime import datetime
 import tempfile
+import datetime
 
 from .common import VERSION, Meta
 
@@ -35,14 +35,14 @@ class S3Remote:
 
     def _get_data_datapath(self, metakey):
         fsguid = metakey.fsguid
-        id_ = metakey.id_
+        id_ = metakey.id
         sid = metakey.sid
         n = metakey.n
         return "%s/%s.data.xz" % (self._get_data_path(fsguid, id_, sid), n)
 
     def _get_data_metapath(self, metakey):
         fsguid = metakey.fsguid
-        id_ = metakey.id_
+        id_ = metakey.id
         sid = metakey.sid
         n = metakey.n
         return "%s/%s.meta" % (self._get_data_path(fsguid, id_, sid), n)
@@ -129,9 +129,9 @@ class S3Remote:
 
     def index(self, backsnap):
         logging.debug("s3 index %s" % backsnap.meta.key)
-        now = datetime.utcnow()
+        now = datetime.datetime.utcnow()
         fsguid = backsnap.meta.key.fsguid
-        id_ = backsnap.meta.key.id_
+        id_ = backsnap.meta.key.id
         named_indexes = {
             'current': self._get_index_metapath(fsguid, id_, "current"),
             'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),

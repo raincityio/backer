@@ -4,7 +4,7 @@ import os
 import shutil
 import logging
 import lzma
-from datetime import datetime
+import datetime
 
 from .common import VERSION, Meta
 
@@ -40,14 +40,14 @@ class FsRemote:
         return path
 
     def _get_data_datapath(self, metakey, *, make=False):
-        id_ = metakey.id_
+        id_ = metakey.id
         fsguid = metakey.fsguid
         sid = metakey.sid
         n = metakey.n
         return "%s/%s.data.xz" % (self._get_data_path(fsguid, id_, sid, make=make), n)
 
     def _get_data_metapath(self, metakey, *, make=False):
-        id_ = metakey.id_
+        id_ = metakey.id
         fsguid = metakey.fsguid
         sid = metakey.sid
         n = metakey.n
@@ -109,9 +109,9 @@ class FsRemote:
     # TODO, this should be a noop
     def index(self, backsnap):
         logging.debug("fs index %s" % backsnap.meta.key)
-        now = datetime.utcnow()
+        now = datetime.datetime.utcnow()
         fsguid = backsnap.meta.key.fsguid
-        id_ = backsnap.meta.key.id_
+        id_ = backsnap.meta.key.id
         named_indexes = {
             'current': self._get_index_metapath(fsguid, id_, "current", make=True),
             'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
