@@ -6,7 +6,7 @@ import time
 import datetime
 import socket
 
-VERSION='10a'
+VERSION='10'
 
 def utcnow():
     return datetime.datetime.utcnow().timestamp()
