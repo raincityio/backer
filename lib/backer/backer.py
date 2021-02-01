@@ -401,12 +401,14 @@ def main():
                 else:
                     next_ = latest.meta.creation + backup.period
                 backup_times[backup_name] = (backup, next_)
+            # TODO rediscover snaps every time
             while not finished.is_set():
                 for backup_name, (backup, next_) in backup_times.items():
                     if next_ < utcnow():
                         try:
+                            start = utcnow()
                             backup.backup()
-                            next_ = next_ + backup.period
+                            next_ = start + backup.period
                             backup_times[backup_name] = (backup, next_,)
                         except Exception as e:
                             logging.exception(e)
