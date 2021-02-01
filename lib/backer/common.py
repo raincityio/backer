@@ -2,7 +2,6 @@
 
 import json
 import uuid
-import time
 import datetime
 import socket
 
@@ -10,10 +9,6 @@ VERSION='10'
 
 def utcnow():
     return datetime.datetime.utcnow().timestamp()
-
-#def gettz():
-#    dt = datetime.datetime.now().astimezone()
-#    return dt.tzinfo.tzname(dt)
 
 class Meta:
 

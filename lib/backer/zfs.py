@@ -7,7 +7,6 @@ import socket
 import uuid
 import subprocess
 from subprocess import check_output
-from datetime import datetime
 
 def toutc(timestamp):
     return timestamp + time.timezone
@@ -82,7 +81,6 @@ class Snapshot:
                 key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
 
-    # TODO return datetime with tz
     def get_creation(self):
         return toutc(int(str(self.get('creation'))))
 
@@ -170,7 +168,6 @@ class Filesystem:
         output = check_output(['zfs', 'get', '-p', '-H', '-o', 'value', key, self.name])
         return Value.parse(output.rstrip().decode('utf8'))
 
-    # TODO return datetime with tz
     def get_creation(self):
         return toutc(int(str(self.get('creation'))))
 
