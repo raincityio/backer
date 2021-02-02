@@ -3,7 +3,7 @@
 import os
 import sys
 
-libpath = "%s/../lib" % os.path.dirname(__file__)
+libpath = "%s/../lib" % os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, libpath)
 
 from backer.backer import main
