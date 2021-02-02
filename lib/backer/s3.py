@@ -168,5 +168,8 @@ class S3Remote:
             indexes[name] = path
         backsnap.set_remote_state(state)
 
-    def get_current_meta(self, fsid, *, bid=None, sid=None):
-        return self._get_meta(self._get_currentpath(fsid, bid=bid, sid=sid))
+    def get_current_meta(self, fsid, *, bid=None, sid=None, n=None):
+        if n is None:
+            return self._get_meta(self._get_currentpath(fsid, bid=bid, sid=sid))
+        metakey = Meta.Key(fsid, bid, sid, n)
+        return self.get_meta(metakey)

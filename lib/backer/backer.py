@@ -184,12 +184,9 @@ class Backup:
                 previous.snapshot.destroy()
             previous = backsnap
             
-def restore(local, remote, meta_discovery, fsid, bid, restore_fsname):
-    latest_meta = meta_discovery(fsid, bid)
-    if latest_meta is None:
-        raise Exception("latest not found")
-    for n in range(latest_meta.key.n+1):
-        metakey = Meta.Key.from_key(latest_meta.key, n=n)
+def restore(local, remote, restore_fsname, meta):
+    for n in range(meta.key.n+1):
+        metakey = Meta.Key.from_key(meta.key, n=n)
         def streamer(stream, metakey=metakey):
             remote.get_data(metakey, stream)
         logging.debug("restore recv %s" % metakey)
@@ -275,10 +272,12 @@ def main():
 
     restore_parser = subparsers.add_parser('restore')
     restore_parser.add_argument('-l', metavar='local')
+    restore_parser.add_argument('-R', metavar='[restore filesystem name]', required=True)
     restore_parser.add_argument('-r', metavar='remote')
-    restore_parser.add_argument('-b', default='default', metavar='[backup id]')
     restore_parser.add_argument('-f', metavar='[filesystem id]', required=True)
-    restore_parser.add_argument('-F', metavar='[filesystem name]', required=True)
+    restore_parser.add_argument('-b', default='default', metavar='[backup id]')
+    restore_parser.add_argument('-s', metavar='[series id]')
+    restore_parser.add_argument('-n', metavar='n')
 
     subparsers.add_parser('daemon') 
 
@@ -371,13 +370,10 @@ def main():
         for backup_name in cfg.list_backups():
             get_backup(backup_name).index()
     elif action == 'restore':
-        fsid = args.f
-        restore_fsname = args.F
         local = get_local(args.l)
         remote = get_remote(args.r)
-        meta_discovery = remote.get_current_meta
-        bid = args.b
-        restore(local, remote, meta_discovery, fsid, bid, restore_fsname)
+        meta = remote.get_current_meta(args.f, bid=args.b, sid=args.s, n=args.n)
+        restore(local, remote, args.R, meta)
     elif action == 'list':
         remote = get_remote(args.r)
         metas = []
@@ -387,11 +383,7 @@ def main():
         print(json.dumps(metas, indent=2, sort_keys=True))
     elif action == 'get-meta':
         remote = get_remote(args.r)
-        if args.n is None:
-            meta = remote.get_current_meta(args.f, bid=args.b, sid=args.s)
-        else:
-            metakey = Meta.Key(args.f, args.b, args.s, args.n)
-            meta = remote.get_meta(metakey)
+        meta = remote.get_current_meta(args.f, bid=args.b, sid=args.s, n=args.n)
         print(json.dumps(meta.to_map(), indent=2, sort_keys=True))
     elif action == 'daemon':
         finished = threading.Event()

@@ -150,5 +150,8 @@ class FsRemote:
 
     # TODO, this should grab the snapshot based on creation date,
     # possibly use an xattr to store the FsIndex structure
-    def get_current_meta(self, fsid, *, bid=None, sid=None):
-        return self._get_meta(self._get_currentpath(fsid, bid=bid, sid=sid))
+    def get_current_meta(self, fsid, *, bid=None, sid=None, n=None):
+        if n is None:
+            return self._get_meta(self._get_currentpath(fsid, bid=bid, sid=sid))
+        metakey = Meta.Key(fsid, bid, sid, n)
+        return self.get_meta(metakey)
