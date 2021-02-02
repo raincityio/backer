@@ -263,17 +263,15 @@ def main():
     list_parser = subparsers.add_parser('list')
     list_parser.add_argument('-r', metavar='remote')
     list_parser.add_argument('-F', metavar='[filesystem name]')
+    list_parser.add_argument('-f', metavar='[filesystem id]')
+    list_parser.add_argument('-b', metavar='[backup id]')
 
-#    list_ids_parser = subparsers.add_parser('list-ids')
-#    list_ids_parser.add_argument('-r', metavar='remote')
-#    list_ids_parser.add_argument('-g', metavar='fsid', required=True)
-#    list_ids_parser.add_argument('-i', metavar='id')
-#
-#    list_series_parser = subparsers.add_parser('list-series')
-#    list_series_parser.add_argument('-r', metavar='remote')
-#    list_series_parser.add_argument('-g', metavar='fsid', required=True)
-#    list_series_parser.add_argument('-i', default='default', metavar='id')
-#    list_series_parser.add_argument('-s', metavar='sid')
+    get_meta_parser = subparsers.add_parser('get-meta')
+    get_meta_parser.add_argument('-r', metavar='remote')
+    get_meta_parser.add_argument('-f', metavar='[filesystem id]', required=True)
+    get_meta_parser.add_argument('-b', metavar='[backup id]')
+    get_meta_parser.add_argument('-s', metavar='[series id]')
+    get_meta_parser.add_argument('-n', metavar='n')
 
     restore_parser = subparsers.add_parser('restore')
     restore_parser.add_argument('-l', metavar='local')
@@ -383,10 +381,18 @@ def main():
     elif action == 'list':
         remote = get_remote(args.r)
         metas = []
-        for meta in remote.list():
+        for meta in remote.list(fsid=args.f, bid=args.b):
             if (not args.F) or (args.F == meta.fsname):
                 metas.append(meta.to_map())
         print(json.dumps(metas, indent=2, sort_keys=True))
+    elif action == 'get-meta':
+        remote = get_remote(args.r)
+        if args.n is None:
+            meta = remote.get_current_meta(args.f, bid=args.b, sid=args.s)
+        else:
+            metakey = Meta.Key(args.f, args.b, args.s, args.n)
+            meta = remote.get_meta(metakey)
+        print(json.dumps(meta.to_map(), indent=2, sort_keys=True))
     elif action == 'daemon':
         finished = threading.Event()
 

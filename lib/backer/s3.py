@@ -118,49 +118,26 @@ class S3Remote:
                 break
         return names
 
-    def list(self):
-        filesystem_ids = []
-        for fsnode in self._ls("%s/fs" % (self._get_path())):
-            fsid, ext = os.path.splitext(fsnode)
-            if ext != '.fs':
-                continue
-            filesystem_ids.append(fsid)
-        return filesystem_ids
-
-    def list_backups(self, fsid):
-        bids = []
-        for backupnode in self._ls("%s/backup" % (self._get_fs_path(fsid))):
-            bid, ext = os.path.splitext(backupnode)
-            if ext != '.backup':
-                continue
-            bids.append(bid)
-        return bids
-
-    def list(self):
+    def list(self, *, fsid=None, bid=None):
         metas = []
-        for fsnode in self._ls("%s/fs" % (self._get_path())):
-            fsid, ext = os.path.splitext(fsnode)
-            if ext != '.fs':
-                continue
-            metas.append(self._get_current_meta(fsid))
-        return metas
-
-    def list_backups(self, fsid):
-        metas = []
-        for backupnode in self._ls("%s/backup" % (self._get_fs_path(fsid))):
-            bid, ext = os.path.splitext(backupnode)
-            if ext != '.backup':
-                continue
-            metas.append(self.get_current_meta(fsid, bid=bid))
-        return metas
-
-    def list_series(self, fsid, bid):
-        metas = []
-        for seriesnode in self._ls("%s/series" % (self._get_backup_path(fsid, bid))):
-            sid, ext = os.path.splitext(seriesnode)
-            if ext != '.series':
-                continue
-            metas.append(self.get_current_meta(fsid, bid=bid, sid=sid))
+        if fsid is None:
+            for fsnode in self._ls("%s/fs" % (self._get_path())):
+                fsid, ext = os.path.splitext(fsnode)
+                if ext != '.fs':
+                    continue
+                metas.append(self.get_current_meta(fsid))
+        elif bid is None:
+            for backupnode in self._ls("%s/backup" % (self._get_fs_path(fsid))):
+                bid, ext = os.path.splitext(backupnode)
+                if ext != '.backup':
+                    continue
+                metas.append(self.get_current_meta(fsid, bid=bid))
+        else:
+            for seriesnode in self._ls("%s/series" % (self._get_backup_path(fsid, bid))):
+                sid, ext = os.path.splitext(seriesnode)
+                if ext != '.series':
+                    continue
+                metas.append(self.get_current_meta(fsid, bid=bid, sid=sid))
         return metas
 
     def index(self, backsnap):

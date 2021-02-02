@@ -97,31 +97,26 @@ class FsRemote:
             metablob = in_.read()
         return Meta.from_data(metablob.decode('utf8'))
 
-    def list(self):
+    def list(self, *, fsid=None, bid=None):
         metas = []
-        for fsnode in os.listdir("%s/fs" % self._get_path()):
-            fsid, ext = os.path.splitext(fsnode)
-            if ext != '.fs':
-                continue
-            metas.append(self.get_current_meta(fsid))
-        return metas
-
-    def list_backups(self, fsid):
-        metas = []
-        for backupnode in os.listdir("%s/backup" % (self._get_fs_path(fsid))):
-            bid, ext = os.path.splitext(backupnode)
-            if ext != '.backup':
-                continue
-            metas.append(self.get_current_meta(fsid, bid=bid))
-        return metas
-
-    def list_series(self, fsid, bid):
-        metas = []
-        for seriesnode in os.listdir("%s/series" % (self._get_backup_path(fsid, bid))):
-            sid, ext = os.path.splitext(seriesnode)
-            if ext != '.series':
-                continue
-            metas.append(self.get_current_meta(fsid, bid=bid, sid=sid))
+        if fsid is None:
+            for fsnode in os.listdir("%s/fs" % self._get_path()):
+                fsid, ext = os.path.splitext(fsnode)
+                if ext != '.fs':
+                    continue
+                metas.append(self.get_current_meta(fsid))
+        elif bid is None:
+            for backupnode in os.listdir("%s/backup" % (self._get_fs_path(fsid))):
+                bid, ext = os.path.splitext(backupnode)
+                if ext != '.backup':
+                    continue
+                metas.append(self.get_current_meta(fsid, bid=bid))
+        else:
+            for seriesnode in os.listdir("%s/series" % (self._get_backup_path(fsid, bid))):
+                sid, ext = os.path.splitext(seriesnode)
+                if ext != '.series':
+                    continue
+                metas.append(self.get_current_meta(fsid, bid=bid, sid=sid))
         return metas
 
     # TODO, this should be a noop
@@ -134,9 +129,9 @@ class FsRemote:
         now = datetime.datetime.utcnow()
         named_indexes = {
             'current': self._get_currentpath(fsid),
-            'current_bid': self._get_currentpath(fsid, bid=bid),
-            'current_bid_sid': self._get_currentpath(fsid, bid=bid, sid=sid),
-            'day': self._get_index_metapath(fsid, bid, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
+            'bid_current': self._get_currentpath(fsid, bid=bid),
+            'bid_sid_current': self._get_currentpath(fsid, bid=bid, sid=sid),
+            'bid_day': self._get_index_metapath(fsid, bid, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
         }
         
         state = backsnap.get_remote_state()
