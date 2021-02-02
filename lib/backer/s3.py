@@ -27,31 +27,36 @@ class S3Remote:
     def _get_path(self):
         return "%s/%s" % (self.prefix, VERSION)
 
-    def _get_fs_path(self, fsguid):
-        return "%s/%s.fs" % (self._get_path(), fsguid)
+    def _get_fs_path(self, fsid):
+        return "%s/fs/%s.fs" % (self._get_path(), fsid)
 
-    def _get_data_path(self, fsguid, id_, sid):
-        return "%s/%s.backup/data/%s.series" % (self._get_fs_path(fsguid), id_, sid)
+    def _get_backup_path(self, fsid, bid):
+        return "%s/backup/%s.backup" % (self._get_fs_path(fsid), bid)
+
+    def _get_series_path(self, fsid, bid, sid):
+        return "%s/series/%s.series" % (self._get_backup_path(fsid, bid), sid)
+
+    def _get_data_path(self, fsid, bid, sid):
+        return "%s/data" % (self._get_series_path(fsid, bid, sid))
+
+    def _get_index_path(self, fsid, bid):
+        return "%s/index" % (self._get_backup_path(fsid, bid))
 
     def _get_data_datapath(self, metakey):
-        fsguid = metakey.fsguid
-        id_ = metakey.id
-        sid = metakey.sid
-        n = metakey.n
-        return "%s/%s.data.xz" % (self._get_data_path(fsguid, id_, sid), n)
+        return "%s/%s.data.xz" % (self._get_data_path(metakey.fsid, metakey.bid, metakey.sid), metakey.n)
 
     def _get_data_metapath(self, metakey):
-        fsguid = metakey.fsguid
-        id_ = metakey.id
-        sid = metakey.sid
-        n = metakey.n
-        return "%s/%s.meta" % (self._get_data_path(fsguid, id_, sid), n)
+        return "%s/%s.meta" % (self._get_data_path(metakey.fsid, metakey.bid, metakey.sid), metakey.n)
 
-    def _get_index_path(self, fsguid, id_):
-        return "%s/%s.backup/index" % (self._get_fs_path(fsguid), id_)
+    def _get_index_metapath(self, fsid, bid, nodename): 
+        return "%s/%s.meta" % (self._get_index_path(fsid, bid), nodename)
 
-    def _get_index_metapath(self, fsguid, id_, name):
-        return "%s/%s.meta" % (self._get_index_path(fsguid, id_), name)
+    def _get_currentpath(self, fsid, *, bid=None, sid=None):
+        if bid is None:
+            return "%s/current.meta" % (self._get_fs_path(fsid))
+        if sid is None:
+            return "%s/current.meta" % (self._get_backup_path(fsid, bid))
+        return "%s/current.meta" % (self._get_series_path(fsid, bid, sid))
 
     def put_data(self, metakey, stream):
         logging.debug("s3 put data %s" % metakey)
@@ -114,32 +119,69 @@ class S3Remote:
         return names
 
     def list(self):
-        metas = []
-        for fsnode in self._ls(self._get_path()):
-            fsguid, ext = os.path.splitext(fsnode)
+        filesystem_ids = []
+        for fsnode in self._ls("%s/fs" % (self._get_path())):
+            fsid, ext = os.path.splitext(fsnode)
             if ext != '.fs':
                 continue
-            for idnode in self._ls(self._get_fs_path(fsguid)):
-                id_, ext = os.path.splitext(idnode)
-                if ext != '.backup':
-                    continue
-                meta = self.get_current_meta(fsguid, id_)
-                metas.append(meta)
+            filesystem_ids.append(fsid)
+        return filesystem_ids
+
+    def list_backups(self, fsid):
+        bids = []
+        for backupnode in self._ls("%s/backup" % (self._get_fs_path(fsid))):
+            bid, ext = os.path.splitext(backupnode)
+            if ext != '.backup':
+                continue
+            bids.append(bid)
+        return bids
+
+    def list(self):
+        metas = []
+        for fsnode in self._ls("%s/fs" % (self._get_path())):
+            fsid, ext = os.path.splitext(fsnode)
+            if ext != '.fs':
+                continue
+            metas.append(self._get_current_meta(fsid))
+        return metas
+
+    def list_backups(self, fsid):
+        metas = []
+        for backupnode in self._ls("%s/backup" % (self._get_fs_path(fsid))):
+            bid, ext = os.path.splitext(backupnode)
+            if ext != '.backup':
+                continue
+            metas.append(self.get_current_meta(fsid, bid=bid))
+        return metas
+
+    def list_series(self, fsid, bid):
+        metas = []
+        for seriesnode in self._ls("%s/series" % (self._get_backup_path(fsid, bid))):
+            sid, ext = os.path.splitext(seriesnode)
+            if ext != '.series':
+                continue
+            metas.append(self.get_current_meta(fsid, bid=bid, sid=sid))
         return metas
 
     def index(self, backsnap):
         logging.debug("s3 index %s" % backsnap.meta.key)
+        fsid = backsnap.meta.key.fsid
+        bid = backsnap.meta.key.bid
+        sid = backsnap.meta.key.sid
+
         now = datetime.datetime.utcnow()
-        fsguid = backsnap.meta.key.fsguid
-        id_ = backsnap.meta.key.id
         named_indexes = {
-            'current': self._get_index_metapath(fsguid, id_, "current"),
-            'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day)),
+            'current': self._get_currentpath(fsid),
+            'bid_current': self._get_currentpath(fsid, bid=bid),
+            'bid_sid_current': self._get_currentpath(fsid, bid=bid, sid=sid),
+            'bid_day': self._get_index_metapath(fsid, bid, "%s-%s-%s" % (now.year, now.month, now.day)),
         }
         
         state = backsnap.get_remote_state()
         if state is None:
-            state = { 'indexes': {} }
+            state = {}
+        if 'indexes' not in state:
+            state['indexes'] = {}
         indexes = state['indexes']
         for name, path in named_indexes.items():
             if (name in indexes) and (indexes[name] == path):
@@ -149,6 +191,5 @@ class S3Remote:
             indexes[name] = path
         backsnap.set_remote_state(state)
 
-    def get_current_meta(self, fsguid, id_):
-        path = self._get_index_metapath(fsguid, id_, "current")
-        return self._get_meta(path)
+    def get_current_meta(self, fsid, *, bid=None, sid=None):
+        return self._get_meta(self._get_currentpath(fsid, bid=bid, sid=sid))

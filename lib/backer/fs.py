@@ -22,46 +22,51 @@ class FsRemote:
 
     def _get_path(self, *, make=False):
         path = "%s/%s" % (self.root, VERSION)
-        if make:
-            os.makedirs(path, exist_ok=True)
+        make and os.makedirs(path, exist_ok=True)
         return path
 
-    def _get_fs_path(self, fsguid, *, make=False):
-        path = "%s/%s.fs" % (self._get_path(make=make), fsguid)
-        if make:
-            os.makedirs(path, exist_ok=True)
+    def _get_fs_path(self, fsid, *, make=False):
+        path = "%s/fs/%s.fs" % (self._get_path(make=make), fsid)
+        make and os.makedirs(path, exist_ok=True)
         return path
 
-    def _get_data_path(self, fsguid, id_, sid, *, make=False):
-        path = "%s/%s.backup/data/%s.series" % \
-                (self._get_fs_path(fsguid, make=make), id_, sid)
-        if make:
-            os.makedirs(path, exist_ok=True)
+    def _get_backup_path(self, fsid, bid, *, make=False):
+        path = "%s/backup/%s.backup" % (self._get_fs_path(fsid, make=make), bid)
+        make and os.makedirs(path, exist_ok=True)
+        return path
+
+    def _get_series_path(self, fsid, bid, sid, *, make=False):
+        path = "%s/series/%s.series" % (self._get_backup_path(fsid, bid, make=make), sid)
+        make and os.makedirs(path, exist_ok=True)
+        return path
+
+    def _get_data_path(self, fsid, bid, sid, *, make=False):
+        path = "%s/data" % (self._get_series_path(fsid, bid, sid, make=make))
+        make and os.makedirs(path, exist_ok=True)
+        return path
+
+    def _get_index_path(self, fsid, bid, *, make=False):
+        path = "%s/index" % (self._get_backup_path(fsid, bid, make=make))
+        make and os.makedirs(path, exist_ok=True)
         return path
 
     def _get_data_datapath(self, metakey, *, make=False):
-        id_ = metakey.id
-        fsguid = metakey.fsguid
-        sid = metakey.sid
-        n = metakey.n
-        return "%s/%s.data.xz" % (self._get_data_path(fsguid, id_, sid, make=make), n)
+        dpath = self._get_data_path(metakey.fsid, metakey.bid, metakey.sid, make=make)
+        return "%s/%s.data.xz" % (dpath, metakey.n)
 
     def _get_data_metapath(self, metakey, *, make=False):
-        id_ = metakey.id
-        fsguid = metakey.fsguid
-        sid = metakey.sid
-        n = metakey.n
-        return "%s/%s.meta" % (self._get_data_path(fsguid, id_, sid, make=make), n)
+        dpath = self._get_data_path(metakey.fsid, metakey.bid, metakey.sid, make=make)
+        return "%s/%s.meta" % (dpath, metakey.n)
 
-    def _get_index_path(self, fsguid, id_, *, make=False):
-        path = "%s/%s.backup/index" % \
-                (self._get_fs_path(fsguid, make=make), id_)
-        if make:
-            os.makedirs(path, exist_ok=True)
-        return path
+    def _get_index_metapath(self, fsid, bid, nodename, *, make=False):
+        return "%s/%s.meta" % (self._get_index_path(fsid, bid, make=make), nodename)
 
-    def _get_index_metapath(self, fsguid, id_, nodename, *, make=False):
-        return "%s/%s.meta" % (self._get_index_path(fsguid, id_, make=make), nodename)
+    def _get_currentpath(self, fsid, *, bid=None, sid=None, make=False):
+        if bid is None:
+            return "%s/current.meta" % (self._get_fs_path(fsid, make=make))
+        if sid is None:
+            return "%s/current.meta" % (self._get_backup_path(fsid, bid, make=make))
+        return "%s/current.meta" % (self._get_series_path(fsid, bid, sid, make=make))
 
     def put_data(self, metakey, stream):
         logging.debug("fs put %s" % metakey)
@@ -94,32 +99,51 @@ class FsRemote:
 
     def list(self):
         metas = []
-        for fsnode in os.listdir(self._get_path()):
-            fsguid, ext = os.path.splitext(fsnode)
+        for fsnode in os.listdir("%s/fs" % self._get_path()):
+            fsid, ext = os.path.splitext(fsnode)
             if ext != '.fs':
                 continue
-            for idnode in os.listdir(self._get_fs_path(fsguid)):
-                id_, ext = os.path.splitext(idnode)
-                if ext != '.backup':
-                    continue
-                meta = self.get_current_meta(fsguid, id_)
-                metas.append(meta)
+            metas.append(self.get_current_meta(fsid))
+        return metas
+
+    def list_backups(self, fsid):
+        metas = []
+        for backupnode in os.listdir("%s/backup" % (self._get_fs_path(fsid))):
+            bid, ext = os.path.splitext(backupnode)
+            if ext != '.backup':
+                continue
+            metas.append(self.get_current_meta(fsid, bid=bid))
+        return metas
+
+    def list_series(self, fsid, bid):
+        metas = []
+        for seriesnode in os.listdir("%s/series" % (self._get_backup_path(fsid, bid))):
+            sid, ext = os.path.splitext(seriesnode)
+            if ext != '.series':
+                continue
+            metas.append(self.get_current_meta(fsid, bid=bid, sid=sid))
         return metas
 
     # TODO, this should be a noop
     def index(self, backsnap):
         logging.debug("fs index %s" % backsnap.meta.key)
+        fsid = backsnap.meta.key.fsid
+        bid = backsnap.meta.key.bid
+        sid = backsnap.meta.key.sid
+
         now = datetime.datetime.utcnow()
-        fsguid = backsnap.meta.key.fsguid
-        id_ = backsnap.meta.key.id
         named_indexes = {
-            'current': self._get_index_metapath(fsguid, id_, "current", make=True),
-            'day': self._get_index_metapath(fsguid, id_, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
+            'current': self._get_currentpath(fsid),
+            'current_bid': self._get_currentpath(fsid, bid=bid),
+            'current_bid_sid': self._get_currentpath(fsid, bid=bid, sid=sid),
+            'day': self._get_index_metapath(fsid, bid, "%s-%s-%s" % (now.year, now.month, now.day), make=True),
         }
         
         state = backsnap.get_remote_state()
         if state is None:
-            state = { 'indexes': {} }
+            state = {}
+        if 'indexes' not in state:
+            state['indexes'] = {}
         indexes = state['indexes']
         for name, path in named_indexes.items():
             if (name in indexes) and (indexes[name] == path):
@@ -131,6 +155,5 @@ class FsRemote:
 
     # TODO, this should grab the snapshot based on creation date,
     # possibly use an xattr to store the FsIndex structure
-    def get_current_meta(self, fsguid, id_):
-        path = self._get_index_metapath(fsguid, id_, 'current')
-        return self._get_meta(path)
+    def get_current_meta(self, fsid, *, bid=None, sid=None):
+        return self._get_meta(self._get_currentpath(fsid, bid=bid, sid=sid))
