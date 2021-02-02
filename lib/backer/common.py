@@ -5,7 +5,7 @@ import uuid
 import datetime
 import socket
 
-VERSION='10b'
+VERSION='11'
 
 def utcnow():
     return datetime.datetime.utcnow().timestamp()
